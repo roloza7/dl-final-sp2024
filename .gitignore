@@ -166,7 +166,7 @@ cython_debug/
 ####################
 
 # Dataset root
-data/
+coco/
 
 # Checkpoints root
 checkpoints/

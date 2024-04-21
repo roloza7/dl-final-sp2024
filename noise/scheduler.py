@@ -27,15 +27,15 @@ class NoiseScheduler:
         self.betas = torch.linspace(beta_start, beta_end, num_steps, device=device, dtype=torch.float)
 
         self.alphas = 1 - self.betas
-        self.alpha_bars = torch.cumprod(self.alphas)
+        self.alpha_bars = torch.cumprod(self.alphas, 0)
         self.num_steps = num_steps
         self.text_alphas = torch.arange(num_steps, -1, -1) / num_steps
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.alphas = torch.from_numpy(self.alphas).to(self.device).float()
-        self.alpha_bars = torch.from_numpy(self.alpha_bars).to(self.device).float()
-        self.betas = torch.from_numpy(self.betas).to(self.device).float()
-        self.text_alphas = torch.from_numpy(self.text_alphas).to(self.device).float()
+        self.alphas = self.alphas.to(self.device).float()
+        self.alpha_bars = self.alpha_bars.to(self.device).float()
+        self.betas = self.betas.to(self.device).float()
+        self.text_alphas = self.text_alphas.to(self.device).float()
         
     def add_noise(self, original_samples, timesteps, mask, mean=0.0, std=1.0):
         noisy_samples = None

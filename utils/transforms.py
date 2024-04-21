@@ -1,4 +1,20 @@
 from torchvision.transforms import functional as VF
+import torchvision.transforms.v2 as v2
+import torch
+import torch.nn
+
+image_transform = v2.Compose([
+    v2.Resize((224, 224)),
+    v2.ToImage(),
+    v2.ToDtype(torch.float32, scale=True),
+])
+
+def _transform(image : torch.Tensor, caption : torch.Tensor):
+    image = image_transform(image)
+    return image, caption
+
+def get_transform():
+    return _transform
 
 class ResizeTransform:
     def __init__(self, new_width, new_height, instances=False): # instances if using bounding boxes set

@@ -170,3 +170,6 @@ coco/
 
 # Checkpoints root
 checkpoints/
+
+# Cache root
+cache/

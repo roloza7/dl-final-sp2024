@@ -11,11 +11,14 @@ class NoiseScheduler:
 
         self.alphas = 1 - self.betas
         self.alpha_bars = np.cumprod(self.alphas)
+        self.num_steps = num_steps
+        self.text_alphas = np.arange(num_steps, -1, -1) / num_steps
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.alphas = torch.from_numpy(self.alphas).to(self.device).float()
         self.alpha_bars = torch.from_numpy(self.alpha_bars).to(self.device).float()
         self.betas = torch.from_numpy(self.betas).to(self.device).float()
+        self.text_alphas = torch.from_numpy(self.text_alphas).to(self.device).float()
         
     def add_noise(self, original_samples, timesteps, mask, mean=0.0, std=1.0):
         noisy_samples = None
@@ -37,7 +40,7 @@ class NoiseScheduler:
         
         RETURNS:
         corruptions: tensor shape (batch_size, N)'''
-        alpha = 1 - self.alpha_bars[timesteps]
+        alpha = 1 - self.text_alphas[timesteps]
         alpha = torch.unsqueeze(alpha, dim=1).repeat(1, captions.shape[1])
         m = torch.bernoulli(alpha).int()
         noise = torch.randint(1, vocab_size+1, size=captions.shape)
@@ -45,5 +48,3 @@ class NoiseScheduler:
         corruptions = (1 - m) * captions + m * noise
 
         return corruptions
-
-

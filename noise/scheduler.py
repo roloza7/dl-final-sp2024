@@ -1,22 +1,25 @@
 import torch
+import torch.nn.functional as F
 
 def mask_image(image_tensor, patch_size, masking_ratio=0.75):
     """
     Randomly masks the given percentage of image patches, returning the masked image and mask
     """
-    C, H, W = image_tensor.shape
+
+    if len(image_tensor.shape) < 4:
+        image_tensor = image_tensor.unsqueeze(0)
+
+    B, C, H, W = image_tensor.shape
     assert H % patch_size == 0 and W % patch_size == 0, "Image dimensions must be divisible by the patch size."
 
-    num_patches = (H // patch_size) * (W // patch_size)
-    num_masked_patches = int(num_patches * masking_ratio)
-    patch_indices = torch.randperm(num_patches)[:num_masked_patches]
-    mask = torch.ones((C, H, W))
+    mask_H, mask_W = int(H // patch_size), int(W // patch_size)
 
-    for idx in patch_indices:
-        row = (idx // (W // patch_size)) * patch_size
-        col = (idx % (W // patch_size)) * patch_size
-        mask[:, row:row+patch_size, col:col+patch_size] = 0
-    masked_image = image_tensor * mask
+    mask = torch.rand((B, mask_H, mask_W), device=image_tensor.device) < masking_ratio
+
+    mask = mask.repeat_interleave(patch_size, dim=1, output_size=H).repeat_interleave(patch_size, dim=2, output_size=W)
+
+    masked_image = image_tensor * ~mask
+
     return masked_image, mask
 
 class NoiseScheduler:

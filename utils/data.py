@@ -20,6 +20,9 @@ def __collate_fn(data : list[tuple[torch.Tensor, torch.Tensor]], pad_id : int) -
     images = torch.stack(images, dim=0)
     return images, captions
 
+def collate_fn(pad_id : int):
+    return partial(__collate_fn, pad_id = pad_id)
+
 class COCOAEDataset(Dataset):
     def __init__(self,
                  root : str = None, 

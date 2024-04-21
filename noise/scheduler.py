@@ -35,3 +35,22 @@ class NoiseScheduler:
 
         noisy_samples = torch.sqrt(alpha_bars_t).unsqueeze(-1) * original_samples + torch.sqrt(1 - alpha_bars_t).unsqueeze(-1) * noise * mask       
         return noisy_samples 
+    
+    def add_text_noise(self, captions, timesteps, vocab_size):
+        '''Apply random masking to input based on timestep
+        
+        INPUTS:
+        captions: tensor tokens of captions shape(batch_size, N)
+        timesteps: tensor shape (batch_size)
+        vocab_size: int
+        
+        RETURNS:
+        corruptions: tensor shape (batch_size, N)'''
+        alpha = 1 - self.alpha_bars[timesteps]
+        alpha = torch.unsqueeze(alpha, dim=1).repeat(1, captions.shape[1])
+        m = torch.bernoulli(alpha).int()
+        noise = torch.randint(1, vocab_size+1, size=captions.shape)
+
+        corruptions = (1 - m) * captions + m * noise
+
+        return corruptions

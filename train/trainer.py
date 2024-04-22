@@ -27,7 +27,8 @@ class Trainer():
                  collate_fn = None,
                  parallel : bool = False,
                  num_replicas : int = None,
-                 rank : int = None) -> None:
+                 rank : int = None,
+                 local_rank : int = None) -> None:
         
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -64,6 +65,7 @@ class Trainer():
         # Parallel tools
         self.parallel = parallel
         self.rank = rank
+        self.local_rank = local_rank
         self.head = rank == 0 or self.parallel == False
 
         self.logger = TrainLogger("dl-train", "logs/") if self.head else None
@@ -129,11 +131,11 @@ class Trainer():
 
         # Enable distributed training
         if self.parallel:
-            if self.rank == None:
+            if self.local_rank == None:
                 raise ValueError("Rank must be defined for distributed training")
-            self.model = self.model.to(self.rank)
-            self.model = DDP(self.model, device_ids=[self.rank])
-            map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
+            self.model = self.model.to(self.local_rank)
+            self.model = DDP(self.model, device_ids=[self.local_rank])
+            map_location = {'cuda:%d' % 0: 'cuda:%d' % self.local_rank}
             if load_path != None:
                 self.model.load_state_dict(
                     torch.load(load_path, map_location=map_location)

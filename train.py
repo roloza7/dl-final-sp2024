@@ -93,7 +93,8 @@ if __name__ == "__main__":
         collate_fn=collate_fn(pad_id),
         parallel=PARALLEL,
         num_replicas=size if PARALLEL else None,
-        rank=rank if PARALLEL else None
+        rank=rank if PARALLEL else None,
+        local_rank=local_rank if PARALLEL else None
     )
 
     # def usr1_sig_handler(signum, frame):

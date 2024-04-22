@@ -18,10 +18,57 @@ def mask_image(image_tensor, patch_size, masking_ratio=0.75):
 
     mask = mask.repeat_interleave(patch_size, dim=1, output_size=H).repeat_interleave(patch_size, dim=2, output_size=W)
 
+    if len(mask.shape) < 4:
+        mask = mask.unsqueeze(1)
+
     masked_image = image_tensor * ~mask
 
     return masked_image, mask
 
+class LinearMaskScheduler:
+    def __init__(self, vocab_size, masking_ratio = 0.75, patch_size = 16, device = "cpu"):
+        self.patch_size = patch_size
+        self.vocab_size = vocab_size
+        self.masking_ratio = masking_ratio
+
+    def batched_linear_mask(self, image_tensor : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if len(image_tensor.shape) < 4:
+            image_tensor = image_tensor.unsqueeze(0)
+        
+        B, _, H, W = image_tensor.shape
+        assert H % self.patch_size == 0 and W % self.patch_size == 0, "Image dimensions must be divisible by the patch size."
+
+        folded = F.unfold(image_tensor, (self.patch_size, self.patch_size), padding=0, stride=(self.patch_size, self.patch_size)).permute(0, 2, 1)
+
+        idx_to_keep = int(folded.shape[1] * (1 - self.masking_ratio))
+
+        # torch doesn't have randperm for batches for some godforsaken reason
+        permutations = torch.rand((folded.shape[:2]), device=image_tensor.device).argsort(dim=-1)
+        shuffle_backward = permutations.argsort(dim=-1)
+
+        shuffle_forward = permutations[:, :idx_to_keep]
+        masked = torch.gather(folded, dim=1, index=shuffle_forward.unsqueeze(-1).expand((shuffle_forward.shape) + (folded.shape[-1],)))
+
+        return masked, shuffle_forward, shuffle_backward
+    
+    def batched_text_linear_mask(self, captions : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        mask = torch.rand(captions.shape, dtype=torch.float, device=captions.device) < self.masking_ratio
+        noise = torch.randint_like(captions, 1, self.vocab_size)
+        corruptions = ~mask * captions + mask * noise
+        return corruptions, mask
+    
+    def get_masked(self, image_tensor, captions, need_masks = False):
+        B = image_tensor.shape[0]
+        assert image_tensor.shape[0] == captions.shape[0], "Image batch size must equal caption batch size"
+    
+        masked_images, shuffle_forward, shuffle_backward = self.batched_linear_mask(image_tensor)
+        masked_text, text_mask = self.batched_text_linear_mask(captions)
+
+        if need_masks:
+            return masked_images, masked_text, (shuffle_forward, shuffle_backward, text_mask)
+
+        return masked_images, masked_text
+    
 class NoiseScheduler:
     def __init__(self, num_steps, beta_start = 0.0001, beta_end = 0.02, device = "cpu"):
         self.betas = torch.linspace(beta_start, beta_end, num_steps, device=device, dtype=torch.float)
@@ -31,7 +78,7 @@ class NoiseScheduler:
         self.num_steps = num_steps
         self.text_alphas = torch.arange(num_steps, -1, -1) / num_steps
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
         self.alphas = self.alphas.to(self.device).float()
         self.alpha_bars = self.alpha_bars.to(self.device).float()
         self.betas = self.betas.to(self.device).float()

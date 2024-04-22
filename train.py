@@ -1,6 +1,7 @@
 from train.trainer import Trainer
 import torch.nn as nn
 
+
 # trainer = Trainer(
 #     module,               <- module we want to train
 #     dataset=dataset,      <- dataset to train on

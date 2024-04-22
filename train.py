@@ -1,31 +1,112 @@
-from train.trainer import Trainer
+"""
+train.py
+
+We don't have to use this in our PCs but I decided it would be interesting to have a piece of code designed to work within PACEs
+multi GPU environment
+
+"""
+import argparse
+import torch
+from torch.utils.data import random_split
 import torch.nn as nn
+from noise.scheduler import LinearMaskScheduler
+from utils.data import COCOAEDataset, collate_fn
+import signal
+from time import time
+from train.trainer import Trainer
+import os
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from transformers import BertTokenizerFast
+from utils.transforms import get_transform
+from models.masked_autoencoder import MaskedAutoEncoderForPretraining, MaskedAEConfig
 
+if __name__ == "__main__":
 
-# trainer = Trainer(
-#     module,               <- module we want to train
-#     dataset=dataset,      <- dataset to train on
-#     criterion,            <- loss function
-#     optimizer,            <- optimizer CLASS i.e. torch.optim.AdamW
-#     optimizer_args,       <- dict containing optimizer args i.e. {'lr':1e-3} 
-#     validation_dataset,   <- dataset to validate on (optional)
-#     lr_sched,             <- lr scheduler (optional, not implemented)
-#     lr_sched_args,        <- dict containing lr sched args (optional, not implemented)
-#     collate_fn,           <- collate_fn (optional, we might want to use if our dataset needs custom batching (it probably does))
-#     parallel,             <- whether to use multiple GPUs (defaults to false)
-#     num_replicas,         <- number of GPUs (only needed if parallel)
-#     rank,                 <- rank of this GPU (ask me (Rodrigo) if you want to set up distributed) (only needed if parallel)
-# )
+    parser = argparse.ArgumentParser(
+        description="Script to train MMViT"
+    )
 
-# trainer.train(self,
-#               n_epochs        <- TOTAL number of epochs to train
-#               batch_size      <- training batch size
-#               save_path       <- path to save our checkpoints (required, it's always going to save it somewhere to avoid lost progress)
-#               num_workers     <- number of cpu cores (in distributed, number of cpu cores PER GPU) (optional)
-#               val_batch_size  <- validation batch size (optional, defaults to batch_size)
-#               start_epoch     <- what epoch we are starting on (only used if loading from a previous checkpoint) (optional)
-#               load_path,      <- file to load previous checkpoint from (optional)
-#)
+    parser.add_argument("--imroot", required=True, type=str)
+    parser.add_argument("--annfile", required=True, type=str)
+    parser.add_argument("--save-path", required=True, type=str)
+    parser.add_argument("--num-workers", required=False, type=int, default=0)
+    parser.add_argument("--epochs", required=False, type=int, default=1)
+    parser.add_argument("--batch-size", required=False, type=int, default=32)
+    parser.add_argument("--load-path", required=False, type=str, default=None)
+    parser.add_argument("--parallel", action=argparse.BooleanOptionalAction)
+    args = parser.parse_args()
 
-# TODO: I'll write some code to make this work further, 
-# this is first commit is just boilerplate that I'll edit later once we have a good dataset/image setup
+    IMAGES_PATH = args.imroot
+    CAPTIONS_PATH = args.annfile
+    MODEL_PATH = args.save_path
+    N_EPOCHS = args.epochs
+    BATCH_SIZE = args.batch_size
+    NUM_WORKERS = args.num_workers
+    CHECKPOINT_FILE = args.load_path
+    PARALLEL = args.parallel
+
+    if PARALLEL:
+        rank = int(os.environ['SLURM_PROCID'])
+        local_rank = int(os.environ['SLURM_LOCALID'])
+        size = int(os.environ['SLURM_NTASKS'])
+        cpus_per_task = int(os.environ['SLURM_CPUS_PER_TASK'])
+        print(f"rank: {rank}, local rank: {local_rank}")
+        dist.init_process_group(backend="nccl", init_method="env://", world_size=size, rank=rank)
+
+    print("== Loading Dataset ==")
+    dataset = COCOAEDataset(root="coco/images/train2017/",
+                        annFile="coco/annotations/ann2017/captions_train2017.json",
+                        transform=get_transform(),
+                        tokenizer=BertTokenizerFast.from_pretrained('bert-base-uncased', cache_dir='cache/'),
+                        ignore_cache=False,
+                        train=True)
+    
+    vocab_size = len(dataset.tokenizer)
+    pad_id = dataset.tokenizer.pad_token_id
+
+    train_dataset, val_dataset = random_split(dataset, [0.85, 0.15])
+
+    print("== Loading Model ==")
+    config = MaskedAEConfig(vocab_size=vocab_size)
+    model = MaskedAutoEncoderForPretraining(config)
+    if PARALLEL:
+        torch.cuda.set_device(local_rank)
+        device = torch.device("cuda")
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = model.to(device)
+
+    image_criterion = nn.MSELoss()
+    text_criterion = nn.CrossEntropyLoss()
+
+    print("== Loading Trainer ==")
+    trainer = Trainer(
+        model=model,
+        dataset=train_dataset,
+        image_criterion=image_criterion,
+        text_criterion=text_criterion,
+        optimizer=torch.optim.AdamW,
+        optimizer_args= {'lr': 2e-5, 'weight_decay': 1e-9},
+        noise_scheduler=LinearMaskScheduler(vocab_size),
+        validation_dataset=val_dataset,
+        collate_fn=collate_fn(pad_id),
+        parallel=PARALLEL,
+        num_replicas=size if PARALLEL else None,
+        rank=rank if PARALLEL else None
+    )
+
+    # def usr1_sig_handler(signum, frame):
+    #     trainer.interrupt = True
+
+    # Signal handler for when pace decides we're done, comment this on Windows (no SIGUSR1)
+    # signal.signal(signal.SIGUSR1, usr1_sig_handler)
+
+    print("== Training Start ==")
+    trainer.train(N_EPOCHS, 
+                  BATCH_SIZE,
+                  save_path=MODEL_PATH,
+                  num_workers=NUM_WORKERS,
+                  val_batch_size=BATCH_SIZE,
+                  load_path=CHECKPOINT_FILE) 
+    print("== Training End ==")

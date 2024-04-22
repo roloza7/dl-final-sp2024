@@ -40,7 +40,7 @@ class MaskedAEEncoder(nn.Module):
             config.hidden_dim,
             nhead=config.n_encoder_heads,
             dim_feedforward=config.dim_encoder_feedforward,
-            activation=F.leaky_relu,
+            activation=F.gelu,
             batch_first=True
         )
 
@@ -161,7 +161,7 @@ class MaskedAutoEncoderForPretraining(nn.Module):
 
         # Prepare sequence for decoding
         encoded_img = encoded[:, :image_seq_len, :]
-        encoded_text = encoded_img[:, -word_seq_len:, :]
+        encoded_text = encoded[:, -word_seq_len:, :]
 
         mask_fill_size = (encoded_img.shape[0], self.pred_seq_len - image_seq_len, encoded_img.shape[-1])
         encoded_img = torch.cat([encoded_img, self.transformer.mask_token.expand(mask_fill_size)], dim=1)

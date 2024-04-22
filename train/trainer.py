@@ -8,6 +8,7 @@ from train.log import TrainLogger
 from torch.cuda.amp import GradScaler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+from noise.scheduler import LinearMaskScheduler
 import time
 import os
 
@@ -15,9 +16,11 @@ class Trainer():
     def __init__(self,
                  model : nn.Module,
                  dataset : torch.utils.data.Dataset,
-                 criterion : Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+                 image_criterion : Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+                 text_criterion : Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
                  optimizer : torch.optim.Optimizer,
                  optimizer_args : dict,
+                 noise_scheduler : LinearMaskScheduler,
                  validation_dataset : torch.utils.data.Dataset = None,
                  lr_sched : torch.optim.lr_scheduler._LRScheduler = None,
                  lr_sched_args : dict = None,
@@ -47,7 +50,8 @@ class Trainer():
             self.sampler_args = {'num_replicas': num_replicas, 'rank': rank, 'shuffle': True}
 
         # Loss and optimizer
-        self.criterion = criterion
+        self.image_criterion = image_criterion
+        self.text_criterion = text_criterion
         self.optimizer = optimizer
         self.optimizer_args = optimizer_args
         self.lr_sched = lr_sched
@@ -62,7 +66,12 @@ class Trainer():
         self.rank = rank
         self.head = rank == 0 or self.parallel == False
 
-        self.logger = TrainLogger("dl-rain", "logs/") if self.head else None
+        self.logger = TrainLogger("dl-train", "logs/") if self.head else None
+
+        self.noise_scheduler = noise_scheduler
+
+        self.val_loss = []
+        self.train_loss = []
 
 
     """
@@ -100,7 +109,6 @@ class Trainer():
               save_path : str,
               num_workers : int = 0,
               val_batch_size : int = None,
-              start_epoch : int = 0,
               load_path : str = None):
         
         scaler = GradScaler()
@@ -109,6 +117,16 @@ class Trainer():
             'start_time': time.time()
         }
         
+        # Load running stats
+        if load_path != None:
+            stats = torch.load("running_stats.pkl")
+            if self.head:
+                self.val_loss = stats['val_loss']
+                self.train_loss = stats['train_loss']
+            self.epoch = stats['epoch']
+        else:
+            self.epoch = 0
+
         # Enable distributed training
         if self.parallel:
             if self.rank == None:
@@ -132,7 +150,7 @@ class Trainer():
         # Create optimizer with params we just created
         optimizer : torch.optim.Optimizer = self.optimizer(self.model.parameters(), **self.optimizer_args)
         # Optional lr scheduler
-        lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, **self.lr_sched_args)
+        # lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, **self.lr_sched_args)
 
         # Get datasets
         train_dataloader, val_dataloader = self.__prepare_dataloaders(batch_size, num_workers, val_batch_size)
@@ -140,54 +158,65 @@ class Trainer():
         if self.head:
             self.logger.log("Starting training...")
 
-        for epoch in range(start_epoch, n_epochs):
+        for epoch in range(self.epoch, n_epochs):
             self.model.train()
             for hook in self.epoch_start_hooks:
                 hook(state_dict)
+            if self.head:
+                self.logger.log_start_epoch(epoch)
 
-            self.logger.log_start_epoch(epoch)
+            epoch_image_loss = torch.Tensor([0])
+            epoch_caption_loss = torch.Tensor([0])
+            epoch_image_loss.requires_grad = False
+            epoch_caption_loss.requires_grad = False
 
-            epoch_loss = torch.Tensor([0])
-            epoch_loss.requires_grad = False
-
-            for x_batch in train_dataloader:
+            for images, captions in train_dataloader:
 
                 if self.interrupt == True:
                     break
 
                 
                 # TODO: Loading X variables here
-                
+                images = images.to(self.device, non_blocking=True)
+                captions = captions.to(self.device, non_blocking=True)
+
+                masked_images, masked_text, (ip, rp, _) = self.noise_scheduler.get_masked(images, captions, need_masks=True)
 
                 optimizer.zero_grad(set_to_none=True)
                 # Automatic reduced precision, makes transformers faster
                 with torch.autocast(device_type=self.device, dtype=torch.float16):
                     # Model forward step here
-                    loss = None
+                    reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, ip, rp)
+                    img_loss = self.image_criterion(reconstructed_images, images)
+                    txt_loss = self.text_criterion(reconstructed_captions.permute(0, 2, 1), captions)
+                    loss = img_loss + txt_loss
                     
-                epoch_loss += loss.cpu().item() / len(train_dataloader)
+                epoch_image_loss += img_loss.cpu().item() / len(train_dataloader)
+                epoch_caption_loss += txt_loss.cpu().item() / len(train_dataloader)
 
                 # This is needed due to reduced precision, don't worry about it (or ask me)
                 scaler.scale(loss).backward()
-                scaler.step(self.optim)
+                scaler.step(optimizer)
                 scaler.update()
 
             # Gathering loss data (this is just for analytics)
             if self.parallel:
-                dist.all_reduce(epoch_loss, op=dist.ReduceOp.SUM)
+                dist.all_reduce(epoch_image_loss, op=dist.ReduceOp.AVG)
+                dist.all_reduce(epoch_caption_loss, op=dist.ReduceOp.AVG)
 
             if self.head:
-                self.logger.log(f"Finished epoch {epoch}, train loss {epoch_loss.item():1.5}")
+                self.logger.log(f"Finished epoch {epoch}, image loss {epoch_image_loss.item():1.5}, caption loss {epoch_caption_loss.item():1.5}")
 
             # Optional validation
             if self.validate:
-                val_loss = self.eval(val_dataloader)
+                val_img_loss, val_txt_loss = self.eval(val_dataloader)
                 if self.head:
-                    self.logger.log(f"Finished epoch {epoch}, validation loss {val_loss.item():1.5}")
+                    self.logger.log(f"Finished epoch {epoch}, validation image loss {val_img_loss.item():1.5}, validation caption loss {val_txt_loss.item():1.5}")
 
             if self.head:
                 self.logger.log(f"Saving Checkpoint...")
                 torch.save(self.model.state_dict(), f"{save_path}_{epoch}.chkp")
+                torch.save({'val_loss': self.val_loss, 'train_loss': self.train_loss, 'epoch': self.epoch }, f"running_stats_{epoch}.pkl")
 
             if self.parallel:
                 # Sync everyone again
@@ -202,25 +231,30 @@ class Trainer():
     def eval(self, val_dataloader : DataLoader):
         self.model.eval()
 
-        total_loss = torch.Tensor([0])
-        total_loss.requires_grad = False
-
-        # Getting number of items in dataset, we'll divide by this to get mean loss
-        N = len(self._validation_dataset)
+        epoch_image_loss = torch.Tensor([0])
+        epoch_caption_loss = torch.Tensor([0])
+        epoch_image_loss.requires_grad = False
+        epoch_caption_loss.requires_grad = False
 
         with torch.no_grad():
-            for x_batch in val_dataloader:
+            for images, captions in val_dataloader:
                 
-                # TODO: Load X variables here
+                images = images.to(self.device, non_blocking=True)
+                captions = captions.to(self.device, non_blocking=True)
+
+                masked_images, masked_text, (ip, rp, _) = self.noise_scheduler.get_masked(images, captions, need_masks=True)
 
                 with torch.autocast(device_type=self.device, dtype=torch.float16):
-                    # Inference step here
-                    loss = None
-
-                    total_loss += loss.cpu().item()
+                    reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, ip, rp)
+                    img_loss = self.image_criterion(reconstructed_images, images)
+                    txt_loss = self.text_criterion(reconstructed_captions.permute(0, 2, 1), captions)
+                    
+                epoch_image_loss += img_loss.cpu().item() / len(val_dataloader)
+                epoch_caption_loss += txt_loss.cpu().item() / len(val_dataloader)                    
 
         # Gather loss data
         if self.parallel:
-            dist.all_reduce(total_loss, op=dist.ReduceOp.SUM)
+            dist.all_reduce(epoch_image_loss, op=dist.ReduceOp.AVG)
+            dist.all_reduce(epoch_caption_loss, op=dist.ReduceOp.AVG)
 
-        return total_loss.item()
+        return epoch_image_loss, epoch_caption_loss

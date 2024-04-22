@@ -26,7 +26,7 @@ def mask_image(image_tensor, patch_size, masking_ratio=0.75):
     return masked_image, mask
 
 class LinearMaskScheduler:
-    def __init__(self, vocab_size, masking_ratio = 0.75, patch_size = 16, device = "cpu"):
+    def __init__(self, vocab_size, masking_ratio = 0.75, patch_size = 16):
         self.patch_size = patch_size
         self.vocab_size = vocab_size
         self.masking_ratio = masking_ratio

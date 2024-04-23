@@ -219,8 +219,6 @@ class Trainer():
                     self.logger.log(f"Finished epoch {epoch}, validation image loss {val_img_loss.item():1.5}, validation caption loss {val_txt_loss.item():1.5}")
                     self.val_loss.append(val_img_loss.item())
                     self.val_loss.append(val_txt_loss.item())
-                if self.lr_sched != None:
-                    lr_scheduler.step(val_txt_loss + val_img_loss)
 
             if self.head:
                 self.logger.log(f"Saving Checkpoint...")

@@ -200,6 +200,8 @@ class Trainer():
                 # This is needed due to reduced precision, don't worry about it (or ask me)
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
+                if self.lr_sched != None:
+                    lr_scheduler.step(epoch)
                 scaler.update()
 
             # Gathering loss data (this is just for analytics)

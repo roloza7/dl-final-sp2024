@@ -159,6 +159,9 @@ class Trainer():
         if self.head:
             self.logger.log("Starting training...")
 
+        max_text_loss = None
+        max_image_loss = None
+
         for epoch in range(self.epoch, n_epochs):
             self.model.train()
             for hook in self.epoch_start_hooks:
@@ -190,6 +193,7 @@ class Trainer():
                     reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, ip, rp)
                     img_loss = self.image_criterion(reconstructed_images, images)
                     txt_loss = self.text_criterion(reconstructed_captions.permute(0, 2, 1), captions)
+                    (img_loss, txt_loss), (max_image_loss, max_text_loss) = self.scale_losses(max_image_loss, max_text_loss, img_loss, txt_loss)
                     loss = img_loss + txt_loss
                     
                 epoch_image_loss += img_loss.detach() / len(train_dataloader)
@@ -322,3 +326,14 @@ class Trainer():
         model.load_state_dict(
             torch.load(model_path, map_location=map_location)
         )
+
+    def scale_losses(self, max_image_loss, max_text_loss, image_loss, text_loss):
+        if max_image_loss == None or max_image_loss < image_loss:
+            max_image_loss = image_loss.detach()
+        if max_text_loss == None or max_text_loss < text_loss:
+            max_text_loss = text_loss.detach()
+
+        image_loss = image_loss / max_image_loss
+        text_loss = text_loss / max_text_loss
+
+        return ((image_loss, text_loss), (max_image_loss, max_text_loss))

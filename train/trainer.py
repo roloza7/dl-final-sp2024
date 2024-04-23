@@ -209,6 +209,8 @@ class Trainer():
 
             if self.head:
                 self.logger.log(f"Finished epoch {epoch}, image loss {epoch_image_loss.item():1.5}, caption loss {epoch_caption_loss.item():1.5}")
+                if self.lr_sched != None:
+                    self.logger.log(f"LR Scheduler: {lr_scheduler.get_last_lr()}")
                 self.train_loss.append(epoch_image_loss.item())
                 self.val_loss.append(epoch_caption_loss.item())
 

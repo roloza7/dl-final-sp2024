@@ -18,7 +18,7 @@ class TrainLogger():
                  output_dir : str = "logs",
                  logging_level : int = logging.DEBUG) -> None:
         
-        self.log = logging.getLogger(log_name)
+        self.log_object = logging.getLogger(log_name)
         logging.basicConfig(filename=os.path.join(output_dir, datetime.now().strftime('%m-%d %H:%M:%S.log')),
                             encoding='utf-8',
                             format="%(asctime)s%(message)s",

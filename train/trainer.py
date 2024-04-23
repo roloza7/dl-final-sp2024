@@ -74,6 +74,7 @@ class Trainer():
 
         self.val_loss = []
         self.train_loss = []
+        self.epoch = -1
 
 
     """
@@ -125,9 +126,6 @@ class Trainer():
             if self.head:
                 self.val_loss = stats['val_loss']
                 self.train_loss = stats['train_loss']
-            self.epoch = stats['epoch']
-        else:
-            self.epoch = 0
 
         # Enable distributed training
         if self.parallel:
@@ -146,15 +144,21 @@ class Trainer():
         # Get datasets
         train_dataloader, val_dataloader = self.__prepare_dataloaders(batch_size, num_workers, val_batch_size)
 
-        # Optional lr scheduler
-
-        if self.lr_sched != None:
-            lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, T_max=len(train_dataloader) , last_epoch=-1, **self.lr_sched_args)
-
+        # Load Stuff
         if load_path != None:
-            self.load_state_dict(self.model, optimizer, lr_scheduler, scaler, load_path, map_location=map_location)
+            self.epoch, lr_state_dict = self.load_state_dict(self.model, optimizer, lr_scheduler, scaler, load_path, map_location=map_location)
             if self.parallel:
                 dist.barrier()
+
+        # Optional lr scheduler
+
+
+        if self.lr_sched != None:
+            lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, T_max=len(train_dataloader) , last_epoch=self.epoch, **self.lr_sched_args)
+            lr_warmup = torch.optim.lr_scheduler.LinearLR(optimizer, 0.000001, 1, total_iters=20 * len(val_dataloader), last_epoch=self.epoch)
+            main_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, [lr_warmup, lr_scheduler], [20 * len(val_dataloader)], last_epoch=self.epoch)
+            if load_path != None:
+                main_scheduler.load_state_dict(lr_state_dict)
                 
         if self.head:
             self.logger.log("Starting training...")
@@ -162,7 +166,7 @@ class Trainer():
         max_text_loss = None
         max_image_loss = None
 
-        for epoch in range(self.epoch, n_epochs):
+        for epoch in range(max(self.epoch, 0), n_epochs):
             self.model.train()
             for hook in self.epoch_start_hooks:
                 hook(state_dict)
@@ -203,7 +207,7 @@ class Trainer():
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 if self.lr_sched != None:
-                    lr_scheduler.step()
+                    main_scheduler.step()
                 scaler.update()
 
             # Gathering loss data (this is just for analytics)
@@ -214,7 +218,7 @@ class Trainer():
             if self.head:
                 self.logger.log(f"Finished epoch {epoch}, image loss {epoch_image_loss.item():1.5}, caption loss {epoch_caption_loss.item():1.5}")
                 if self.lr_sched != None:
-                    self.logger.log(f"LR Scheduler: {lr_scheduler.get_last_lr()}")
+                    self.logger.log(f"LR Scheduler: {main_scheduler.get_last_lr()}")
                 self.train_loss.append(epoch_image_loss.item())
                 self.val_loss.append(epoch_caption_loss.item())
 
@@ -228,7 +232,7 @@ class Trainer():
 
             if self.head:
                 self.logger.log(f"Saving Checkpoint...")
-                self.save_state_dict(self.model, optimizer, lr_scheduler, scaler, epoch, save_path)
+                self.save_state_dict(self.model, optimizer, main_scheduler, scaler, epoch, save_path)
                 torch.save({'val_loss': self.val_loss, 'train_loss': self.train_loss, 'epoch': epoch }, f"running_stats.pkl")
 
             if self.parallel:
@@ -312,8 +316,8 @@ class Trainer():
         )
         trainer_state_dict = torch.load(trainer_path)
         optimizer.load_state_dict(trainer_state_dict['optimizer'])
-        lr_scheduler.load_state_dict(trainer_state_dict['lr_scheduler'])
         scaler.load_state_dict(trainer_state_dict['scaler'])
+        return epoch, trainer_state_dict['lr_scheduler']
         
     def load_model_only(self,
                         model : nn.Module,

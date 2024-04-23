@@ -167,8 +167,8 @@ class Trainer():
             if self.head:
                 self.logger.log_start_epoch(epoch)
 
-            epoch_image_loss = torch.Tensor([0], device=self.device)
-            epoch_caption_loss = torch.Tensor([0], device=self.device)
+            epoch_image_loss = torch.tensor([0], device=self.device)
+            epoch_caption_loss = torch.tensor([0], device=self.device)
             epoch_image_loss.requires_grad = False
             epoch_caption_loss.requires_grad = False
 
@@ -237,8 +237,8 @@ class Trainer():
     def eval(self, val_dataloader : DataLoader):
         self.model.eval()
 
-        epoch_image_loss = torch.Tensor([0], device=self.device)
-        epoch_caption_loss = torch.Tensor([0], device=self.device)
+        epoch_image_loss = torch.tensor([0], device=self.device)
+        epoch_caption_loss = torch.tensor([0], device=self.device)
         epoch_image_loss.requires_grad = False
         epoch_caption_loss.requires_grad = False
 

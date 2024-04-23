@@ -151,12 +151,15 @@ class Trainer():
 
         # Create optimizer with params we just created
         optimizer : torch.optim.Optimizer = self.optimizer(self.model.parameters(), **self.optimizer_args)
-        # Optional lr scheduler
-        if self.lr_sched != None:
-            lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, last_epoch=-1, **self.lr_sched_args)
 
         # Get datasets
         train_dataloader, val_dataloader = self.__prepare_dataloaders(batch_size, num_workers, val_batch_size)
+
+        # Optional lr scheduler
+
+        if self.lr_sched != None:
+            lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, T_max=len(train_dataloader) , last_epoch=-1, **self.lr_sched_args)
+
 
         if self.head:
             self.logger.log("Starting training...")
@@ -201,7 +204,7 @@ class Trainer():
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 if self.lr_sched != None:
-                    lr_scheduler.step(epoch)
+                    lr_scheduler.step()
                 scaler.update()
 
             # Gathering loss data (this is just for analytics)

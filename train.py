@@ -89,7 +89,7 @@ if __name__ == "__main__":
         optimizer=torch.optim.AdamW,
         optimizer_args= {'lr': 2e-5, 'weight_decay': 1e-9},
         lr_sched=torch.optim.lr_scheduler.ReduceLROnPlateau,
-        lr_sched_args= {'patience': 5}
+        lr_sched_args= {'patience': 5},
         noise_scheduler=LinearMaskScheduler(vocab_size),
         validation_dataset=val_dataset,
         collate_fn=collate_fn(pad_id),

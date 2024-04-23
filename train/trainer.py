@@ -227,7 +227,7 @@ class Trainer():
             if self.head:
                 self.logger.log(f"Saving Checkpoint...")
                 torch.save(self.model.state_dict(), f"{save_path}_{epoch}.chkp")
-                torch.save({'val_loss': self.val_loss, 'train_loss': self.train_loss, 'epoch': self.epoch }, f"running_stats.pkl")
+                torch.save({'val_loss': self.val_loss, 'train_loss': self.train_loss, 'epoch': epoch }, f"running_stats.pkl")
 
             if self.parallel:
                 # Sync everyone again

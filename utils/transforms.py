@@ -8,6 +8,7 @@ image_transform = v2.Compose([
     v2.ToImage(),
     v2.Lambda(lambda x: x.repeat(3, 1, 1) if x.shape[0] == 1 else x), # Why the hell does the dataset have greyscale images
     v2.ToDtype(torch.float32, scale=True),
+    v2.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
 
 def _transform(image : torch.Tensor, caption : torch.Tensor):

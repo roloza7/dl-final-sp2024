@@ -12,10 +12,10 @@ class MaskedAEConfig:
                  in_channels = 3,
                  n_encoder_heads = 12,
                  dim_encoder_feedforward = 3072,
-                 n_encoder_layers = 6,
+                 n_encoder_layers = 12,
                  n_decoder_heads = 12,
                  dim_decoder_feedforward = 3072,
-                 n_decoder_layers= 6,
+                 n_decoder_layers= 4,
                  ) -> None:
         
         self.vocab_size = vocab_size

@@ -136,18 +136,9 @@ class Trainer():
             self.model = self.model.to(self.local_rank)
             self.model = DDP(self.model, device_ids=[self.local_rank])
             map_location = {'cuda:%d' % 0: 'cuda:%d' % self.local_rank}
-            if load_path != None:
-                self.model.load_state_dict(
-                    torch.load(load_path, map_location=map_location)
-                )
-            # Let all models synchronize
-            dist.barrier()
         # Single GPU training
         else:
-            if load_path != None:
-                self.model.load_state_dict(
-                    torch.load(load_path)
-                )
+            map_location = None
 
         # Create optimizer with params we just created
         optimizer : torch.optim.Optimizer = self.optimizer(self.model.parameters(), **self.optimizer_args)
@@ -160,7 +151,11 @@ class Trainer():
         if self.lr_sched != None:
             lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, T_max=len(train_dataloader) , last_epoch=-1, **self.lr_sched_args)
 
-
+        if load_path != None:
+            self.load_state_dict(self.model, optimizer, lr_scheduler, scaler, load_path, map_location=map_location)
+            if self.parallel:
+                dist.barrier()
+                
         if self.head:
             self.logger.log("Starting training...")
 
@@ -229,15 +224,13 @@ class Trainer():
 
             if self.head:
                 self.logger.log(f"Saving Checkpoint...")
-                torch.save(self.model.state_dict(), f"{save_path}_{epoch}.chkp")
+                self.save_state_dict(self.model, optimizer, lr_scheduler, scaler, epoch, save_path)
                 torch.save({'val_loss': self.val_loss, 'train_loss': self.train_loss, 'epoch': epoch }, f"running_stats.pkl")
 
             if self.parallel:
                 # Sync everyone again
                 dist.barrier()
-                self.model.load_state_dict(
-                    torch.load(f"{save_path}_{epoch}.chkp", map_location=map_location)
-                )
+                self.load_model_only(self.model, save_path, epoch, map_location)
 
             for hook in self.epoch_end_hooks:
                 hook(state_dict)
@@ -272,3 +265,60 @@ class Trainer():
             dist.all_reduce(epoch_caption_loss, op=dist.ReduceOp.AVG)
 
         return epoch_image_loss, epoch_caption_loss
+    
+    def save_state_dict(self,
+                        model : nn.Module,
+                        optimizer : torch.optim.Optimizer,
+                        lr_scheduler : torch.optim.lr_scheduler._LRScheduler,
+                        scaler : GradScaler,
+                        epoch : int,
+                        save_path : str):
+        
+        model_path = os.path.join(save_path, f"model_{epoch}.pkl")
+        trainer_path = os.path.join(save_path, f"trainer_{epoch}.pkl")
+
+        torch.save(model.state_dict(), model_path)
+        trainer_state_dict = {
+            'optimizer' : optimizer.state_dict(),
+            'lr_scheduler' : lr_scheduler.state_dict(),
+            'scaler' : scaler.state_dict(),
+            'epoch' : epoch
+        }
+        torch.save(trainer_state_dict, trainer_path)
+
+    def load_state_dict(self,
+                        model : nn.Module,
+                        optimizer : torch.optim.Optimizer,
+                        lr_scheduler : torch.optim.lr_scheduler._LRScheduler,
+                        scaler : GradScaler,
+                        save_path : str,
+                        epoch : int = None,
+                        map_location = None):
+        
+        if epoch == None:
+            epoch = 0
+            for filename in os.listdir(save_path):
+                epoch = max(epoch, int(filename[:-4].split("_")[1]))
+        
+        model_path = os.path.join(save_path, f"model_{epoch}.pkl")
+        trainer_path = os.path.join(save_path, f"trainer_{epoch}.pkl")
+
+        model.load_state_dict(
+            torch.load(model_path, map_location=map_location)
+        )
+        trainer_state_dict = torch.load(trainer_path)
+        optimizer.load_state_dict(trainer_state_dict['optimizer'])
+        lr_scheduler.load_state_dict(trainer_state_dict['lr_scheduler'])
+        scaler.load_state_dict(trainer_state_dict['scaler'])
+        
+    def load_model_only(self,
+                        model : nn.Module,
+                        load_path : str,
+                        epoch : int,
+                        map_location):
+        
+        model_path = os.path.join(load_path, f"model_{epoch}.pkl")
+
+        model.load_state_dict(
+            torch.load(model_path, map_location=map_location)
+        )

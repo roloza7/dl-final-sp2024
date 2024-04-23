@@ -152,7 +152,8 @@ class Trainer():
         # Create optimizer with params we just created
         optimizer : torch.optim.Optimizer = self.optimizer(self.model.parameters(), **self.optimizer_args)
         # Optional lr scheduler
-        # lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, **self.lr_sched_args)
+        if self.lr_sched != None:
+            lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, **self.lr_sched_args)
 
         # Get datasets
         train_dataloader, val_dataloader = self.__prepare_dataloaders(batch_size, num_workers, val_batch_size)
@@ -218,11 +219,13 @@ class Trainer():
                     self.logger.log(f"Finished epoch {epoch}, validation image loss {val_img_loss.item():1.5}, validation caption loss {val_txt_loss.item():1.5}")
                     self.val_loss.append(val_img_loss.item())
                     self.val_loss.append(val_txt_loss.item())
+                if self.lr_sched != None:
+                    lr_scheduler.step(val_txt_loss + val_img_loss)
 
             if self.head:
                 self.logger.log(f"Saving Checkpoint...")
                 torch.save(self.model.state_dict(), f"{save_path}_{epoch}.chkp")
-                torch.save({'val_loss': self.val_loss, 'train_loss': self.train_loss, 'epoch': self.epoch }, f"running_stats_{epoch}.pkl")
+                torch.save({'val_loss': self.val_loss, 'train_loss': self.train_loss, 'epoch': self.epoch }, f"running_stats.pkl")
 
             if self.parallel:
                 # Sync everyone again

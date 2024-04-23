@@ -167,8 +167,8 @@ class Trainer():
             if self.head:
                 self.logger.log_start_epoch(epoch)
 
-            epoch_image_loss = torch.Tensor([0])
-            epoch_caption_loss = torch.Tensor([0])
+            epoch_image_loss = torch.Tensor([0], device=self.device)
+            epoch_caption_loss = torch.Tensor([0], device=self.device)
             epoch_image_loss.requires_grad = False
             epoch_caption_loss.requires_grad = False
 
@@ -193,8 +193,8 @@ class Trainer():
                     txt_loss = self.text_criterion(reconstructed_captions.permute(0, 2, 1), captions)
                     loss = img_loss + txt_loss
                     
-                epoch_image_loss += img_loss.cpu().item() / len(train_dataloader)
-                epoch_caption_loss += txt_loss.cpu().item() / len(train_dataloader)
+                epoch_image_loss += img_loss.detach() / len(train_dataloader)
+                epoch_caption_loss += txt_loss.detach() / len(train_dataloader)
 
                 # This is needed due to reduced precision, don't worry about it (or ask me)
                 scaler.scale(loss).backward()
@@ -208,12 +208,16 @@ class Trainer():
 
             if self.head:
                 self.logger.log(f"Finished epoch {epoch}, image loss {epoch_image_loss.item():1.5}, caption loss {epoch_caption_loss.item():1.5}")
+                self.train_loss.append(epoch_image_loss.item())
+                self.val_loss.append(epoch_caption_loss.item())
 
             # Optional validation
             if self.validate:
                 val_img_loss, val_txt_loss = self.eval(val_dataloader)
                 if self.head:
                     self.logger.log(f"Finished epoch {epoch}, validation image loss {val_img_loss.item():1.5}, validation caption loss {val_txt_loss.item():1.5}")
+                    self.val_loss.append(val_img_loss.item())
+                    self.val_loss.append(val_txt_loss.item())
 
             if self.head:
                 self.logger.log(f"Saving Checkpoint...")
@@ -233,8 +237,8 @@ class Trainer():
     def eval(self, val_dataloader : DataLoader):
         self.model.eval()
 
-        epoch_image_loss = torch.Tensor([0])
-        epoch_caption_loss = torch.Tensor([0])
+        epoch_image_loss = torch.Tensor([0], device=self.device)
+        epoch_caption_loss = torch.Tensor([0], device=self.device)
         epoch_image_loss.requires_grad = False
         epoch_caption_loss.requires_grad = False
 

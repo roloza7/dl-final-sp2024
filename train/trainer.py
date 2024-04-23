@@ -153,7 +153,7 @@ class Trainer():
         optimizer : torch.optim.Optimizer = self.optimizer(self.model.parameters(), **self.optimizer_args)
         # Optional lr scheduler
         if self.lr_sched != None:
-            lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, last_epoch=self.epoch, **self.lr_sched_args)
+            lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, last_epoch=-1, **self.lr_sched_args)
 
         # Get datasets
         train_dataloader, val_dataloader = self.__prepare_dataloaders(batch_size, num_workers, val_batch_size)

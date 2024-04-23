@@ -15,7 +15,7 @@ class MaskedAEConfig:
                  n_encoder_layers = 12,
                  n_decoder_heads = 12,
                  dim_decoder_feedforward = 3072,
-                 n_decoder_layers= 4,
+                 n_decoder_layers = 4,
                  ) -> None:
         
         self.vocab_size = vocab_size
@@ -41,7 +41,8 @@ class MaskedAEEncoder(nn.Module):
             nhead=config.n_encoder_heads,
             dim_feedforward=config.dim_encoder_feedforward,
             activation=F.gelu,
-            batch_first=True
+            batch_first=True,
+            norm_first=True
         )
 
         self.h = nn.TransformerEncoder(transformer, config.n_encoder_layers, norm=nn.LayerNorm(config.hidden_dim))
@@ -59,7 +60,8 @@ class MaskedAEDecoder(nn.Module):
             nhead=config.n_decoder_heads,
             dim_feedforward=config.dim_decoder_feedforward,
             activation=F.gelu,
-            batch_first=True
+            batch_first=True,
+            norm_first=True
         )
 
         self.h = nn.TransformerEncoder(transformer, config.n_decoder_layers, norm=nn.LayerNorm(config.hidden_dim))

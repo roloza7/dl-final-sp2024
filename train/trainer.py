@@ -247,15 +247,16 @@ class Trainer():
         epoch_caption_loss.requires_grad = False
 
         with torch.no_grad():
-            for images, captions in val_dataloader:
+            for images, captions, lengths in val_dataloader:
                 
                 images = images.to(self.device, non_blocking=True)
                 captions = captions.to(self.device, non_blocking=True)
+                lengths = lengths.to(self.device, non_blocking=True)
 
-                masked_images, masked_text, (ip, rp, _) = self.noise_scheduler.get_masked(images, captions, need_masks=True)
+                masked_images, masked_text, (ip, rp, tm) = self.noise_scheduler.get_masked(images, captions, lengths, need_masks=True)
 
                 with torch.autocast(device_type=self.device, dtype=torch.float16):
-                    reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, ip, rp)
+                    reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, tm, rp)
                     img_loss = self.image_criterion(reconstructed_images, images)
                     txt_loss = self.text_criterion(reconstructed_captions.permute(0, 2, 1), captions)
                     

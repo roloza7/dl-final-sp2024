@@ -180,7 +180,7 @@ class Trainer():
                 captions = captions.to(self.device, non_blocking=True)
                 lengths = lengths.to(self.device, non_blocking=True)
 
-                masked_images, masked_text, (ip, rp, tm) = self.noise_scheduler.get_masked(images, captions, need_masks=True)
+                masked_images, masked_text, (ip, rp, tm) = self.noise_scheduler.get_masked(images, captions, lengths, need_masks=True)
 
                 optimizer.zero_grad(set_to_none=True)
                 # Automatic reduced precision, makes transformers faster

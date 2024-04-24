@@ -2,6 +2,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# def __init__(self,
+#                  vocab_size,
+#                  hidden_dim = 768,
+#                  max_input_len = 256,
+#                  patch_size = 16,
+#                  output_size = (224, 224),
+#                  in_channels = 3,
+#                  n_encoder_heads = 12,
+#                  dim_encoder_feedforward = 3072,
+#                  n_encoder_layers = 12,
+#                  n_decoder_heads = 12,
+#                  dim_decoder_feedforward = 3072,
+#                  n_decoder_layers = 4,
+#                  ) -> None:
+
 class MaskedAEConfig:
     def __init__(self,
                  vocab_size,
@@ -15,7 +30,7 @@ class MaskedAEConfig:
                  n_encoder_layers = 12,
                  n_decoder_heads = 12,
                  dim_decoder_feedforward = 3072,
-                 n_decoder_layers = 4,
+                 n_decoder_layers = 8,
                  ) -> None:
         
         self.vocab_size = vocab_size
@@ -185,7 +200,7 @@ class MaskedAutoEncoderForPretraining(nn.Module):
         image_rec = self.im_head(image_emb)
         
         folded_image_rec = F.fold(image_rec.permute(0, 2, 1), output_size=self.output_size, kernel_size=(self.patch_size, self.patch_size), stride=(self.patch_size, self.patch_size))
-        folded_image_rec = folded_image_rec
+        folded_image_rec = F.sigmoid(folded_image_rec)
 
         return folded_image_rec, captions_rec
         

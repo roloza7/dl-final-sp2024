@@ -155,6 +155,8 @@ class Trainer():
         if self.head:
             self.logger.log("Starting training...")
 
+        if self.epoch == -1:
+            self.epoch = 0
         for epoch in range(max(self.epoch, 0), n_epochs):
             self.model.train()
             for hook in self.epoch_start_hooks:

@@ -156,13 +156,13 @@ class MaskedAutoEncoderForPretraining(nn.Module):
 
         # Modelling heads
         self.lm_head = nn.Sequential(
-            nn.Linear(config.encoder_hidden_dim, 2048),
+            nn.Linear(config.decoder_hidden_dim, 2048),
             nn.LeakyReLU(0.2),
             nn.Linear(2048, config.vocab_size)
         )
 
         self.im_head = nn.Sequential(
-            nn.Linear(config.encoder_hidden_dim, 2048),
+            nn.Linear(config.decoder_hidden_dim, 2048),
             nn.LeakyReLU(0.2),
             nn.Linear(2048, config.in_channels * config.patch_size ** 2)
         )

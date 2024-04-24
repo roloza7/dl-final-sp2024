@@ -298,6 +298,8 @@ class Trainer():
         self.epoch = -1
         for filename in os.listdir(save_path):
             self.epoch = max(self.epoch, int(filename[:-4].split("_")[1]))
+        if self.epoch == -1:
+            return
         
         model_path = os.path.join(save_path, f"model_{self.epoch}.pkl")
         trainer_path = os.path.join(save_path, f"trainer_{self.epoch}.pkl")

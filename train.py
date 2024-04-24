@@ -87,7 +87,7 @@ if __name__ == "__main__":
         image_criterion=image_criterion,
         text_criterion=text_criterion,
         optimizer=torch.optim.AdamW,
-        optimizer_args= {'lr': 1.5e-4, 'betas': (0.9, 0.95), 'weight_decay': 0.05},
+        optimizer_args= {'lr': 3e-4, 'betas': (0.9, 0.95), 'weight_decay': 0.05},
         lr_sched=torch.optim.lr_scheduler.CosineAnnealingLR,
         lr_sched_args= {'eta_min': 0},
         noise_scheduler=LinearMaskScheduler(vocab_size),

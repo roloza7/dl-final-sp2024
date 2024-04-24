@@ -29,7 +29,7 @@ class MaskedAEConfig:
                  n_encoder_heads = 16,
                  dim_encoder_feedforward = 3072,
                  n_encoder_layers = 18,
-                 n_decoder_heads = 12,
+                 n_decoder_heads = 8,
                  dim_decoder_feedforward = 3072,
                  n_decoder_layers = 2,
                  ) -> None:

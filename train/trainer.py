@@ -201,6 +201,7 @@ class Trainer():
                     main_scheduler.step()
                 scaler.update()
 
+            self.epoch = epoch
             # Gathering loss data (this is just for analytics)
             if self.parallel:
                 dist.all_reduce(epoch_image_loss, op=dist.ReduceOp.AVG)

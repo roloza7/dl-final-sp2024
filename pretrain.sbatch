@@ -17,4 +17,4 @@ echo "MASTER_ADDR="$MASTER_ADDR
 
 module load anaconda3/2023.03
 conda activate dl-final-sp2024
-srun python train.py --imroot coco/images --annfile coco/annotations/ann2017/captions_train2017.json --save-path checkpoints/MAE-Base --num-workers 4 --epochs 100 --batch-size 512 --parallel
+srun python train.py --imroot coco/images --annfile coco/annotations/ann2017/captions_train2017.json --save-path checkpoints/MAE-Base --num-workers 4 --epochs 200 --batch-size 512 --parallel

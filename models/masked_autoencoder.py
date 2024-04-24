@@ -20,21 +20,23 @@ import torch.nn.functional as F
 class MaskedAEConfig:
     def __init__(self,
                  vocab_size,
-                 hidden_dim = 768,
+                 encoder_hidden_dim = 1024,
+                 decoder_hidden_dim = 512,
                  max_input_len = 256,
                  patch_size = 16,
                  output_size = (224, 224),
                  in_channels = 3,
-                 n_encoder_heads = 12,
+                 n_encoder_heads = 16,
                  dim_encoder_feedforward = 3072,
-                 n_encoder_layers = 12,
+                 n_encoder_layers = 18,
                  n_decoder_heads = 12,
                  dim_decoder_feedforward = 3072,
-                 n_decoder_layers = 8,
+                 n_decoder_layers = 2,
                  ) -> None:
         
         self.vocab_size = vocab_size
-        self.hidden_dim = hidden_dim
+        self.encoder_hidden_dim = encoder_hidden_dim
+        self.decoder_hidden_dim = decoder_hidden_dim
         self.max_input_len = max_input_len
         self.patch_size = patch_size
         self.n_encoder_heads = n_encoder_heads
@@ -52,7 +54,7 @@ class MaskedAEEncoder(nn.Module):
         super().__init__()
 
         transformer = nn.TransformerEncoderLayer(
-            config.hidden_dim,
+            config.encoder_hidden_dim,
             nhead=config.n_encoder_heads,
             dim_feedforward=config.dim_encoder_feedforward,
             activation=F.gelu,
@@ -60,7 +62,7 @@ class MaskedAEEncoder(nn.Module):
             norm_first=True
         )
 
-        self.h = nn.TransformerEncoder(transformer, config.n_encoder_layers, norm=nn.LayerNorm(config.hidden_dim))
+        self.h = nn.TransformerEncoder(transformer, config.n_encoder_layers, norm=nn.LayerNorm(config.encoder_hidden_dim))
 
     def forward(self, embeddings):
         
@@ -71,7 +73,7 @@ class MaskedAEDecoder(nn.Module):
         super().__init__()
 
         transformer = nn.TransformerEncoderLayer(
-            config.hidden_dim,
+            config.decoder_hidden_dim,
             nhead=config.n_decoder_heads,
             dim_feedforward=config.dim_decoder_feedforward,
             activation=F.gelu,
@@ -79,7 +81,7 @@ class MaskedAEDecoder(nn.Module):
             norm_first=True
         )
 
-        self.h = nn.TransformerEncoder(transformer, config.n_decoder_layers, norm=nn.LayerNorm(config.hidden_dim))
+        self.h = nn.TransformerEncoder(transformer, config.n_decoder_layers, norm=nn.LayerNorm(config.decoder_hidden_dim))
 
     def forward(self, encoded):
         
@@ -90,23 +92,23 @@ class MaskedAutoEncoder(nn.Module):
         super().__init__()
 
         # Patch token embedding
-        self.ite = nn.Linear(config.in_channels * config.patch_size ** 2, config.hidden_dim)
+        self.ite = nn.Linear(config.in_channels * config.patch_size ** 2, config.encoder_hidden_dim)
         # Patch positional embedding
-        self.ipe = nn.Embedding(config.max_input_len, config.hidden_dim)
+        self.ipe = nn.Embedding(config.max_input_len, config.encoder_hidden_dim)
 
         self.pred_seq_len = config.prediction_sequence_length
 
         # Word token embedding
-        self.wte = nn.Embedding(config.vocab_size, config.hidden_dim)
+        self.wte = nn.Embedding(config.vocab_size, config.encoder_hidden_dim)
         # Word positional embedding
-        self.wpe = nn.Embedding(config.max_input_len, config.hidden_dim)
+        self.wpe = nn.Embedding(config.max_input_len, config.encoder_hidden_dim)
 
         self.encoder = MaskedAEEncoder(config)
 
         self.patch_size = config.patch_size
         self.output_size = config.output_size
 
-        self.mask_token = nn.Parameter(torch.zeros((1, 1, config.hidden_dim)))
+        self.mask_token = nn.Parameter(torch.zeros((1, 1, config.encoder_hidden_dim)))
         torch.nn.init.xavier_normal_(self.mask_token.data)
 
     """
@@ -142,23 +144,25 @@ class MaskedAutoEncoderForPretraining(nn.Module):
         self.transformer = MaskedAutoEncoder(config)
 
         # Decoder positional embedding
-        self.dpe = nn.Embedding(config.max_input_len * 2, config.hidden_dim)
+        self.dpe = nn.Embedding(config.max_input_len * 2, config.encoder_hidden_dim)
 
         self.pred_seq_len = config.prediction_sequence_length
         self.output_size = config.output_size
         self.patch_size = config.patch_size
 
+        self.transform = nn.Linear(config.encoder_hidden_dim, config.decoder_hidden_dim)
+
         self.decoder = MaskedAEDecoder(config)
 
         # Modelling heads
         self.lm_head = nn.Sequential(
-            nn.Linear(config.hidden_dim, 2048),
+            nn.Linear(config.encoder_hidden_dim, 2048),
             nn.LeakyReLU(0.2),
             nn.Linear(2048, config.vocab_size)
         )
 
         self.im_head = nn.Sequential(
-            nn.Linear(config.hidden_dim, 2048),
+            nn.Linear(config.encoder_hidden_dim, 2048),
             nn.LeakyReLU(0.2),
             nn.Linear(2048, config.in_channels * config.patch_size ** 2)
         )
@@ -189,6 +193,8 @@ class MaskedAutoEncoderForPretraining(nn.Module):
         encoded_text = encoded_text + self.transformer.wpe(torch.arange(0, word_seq_len, device=encoded_text.device, dtype=torch.long))
 
         encoded = torch.cat([encoded_img, encoded_text], dim=1)
+
+        encoded = self.transform(encoded)
 
         decoded = self.decoder(encoded)
 

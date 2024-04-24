@@ -143,9 +143,9 @@ class Trainer():
         # Optional LR Scheduler
         if self.lr_sched != None:
             # lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, T_max=len(train_dataloader) , last_epoch=self.epoch, **self.lr_sched_args)
-            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=len(train_dataloader), T_mult=2, last_epoch=self.epoch)
-            lr_warmup = torch.optim.lr_scheduler.LinearLR(optimizer, 0.000001, 1, total_iters=20 * len(train_dataloader), last_epoch=self.epoch)
-            main_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, [lr_warmup, lr_scheduler], [20 * len(train_dataloader)], last_epoch=self.epoch)
+            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=4 * len(train_dataloader), T_mult=2, last_epoch=self.epoch)
+            lr_warmup = torch.optim.lr_scheduler.LinearLR(optimizer, 0.000001, 1, total_iters=40 * len(train_dataloader), last_epoch=self.epoch)
+            main_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, [lr_warmup, lr_scheduler], [40 * len(train_dataloader)], last_epoch=self.epoch)
 
         # Load Stuff
         if load_path != None:

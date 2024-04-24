@@ -26,10 +26,11 @@ def mask_image(image_tensor, patch_size, masking_ratio=0.75):
     return masked_image, mask
 
 class LinearMaskScheduler:
-    def __init__(self, vocab_size, masking_ratio = 0.75, patch_size = 16):
+    def __init__(self, vocab_size, masking_ratio = 0.75, patch_size = 16, pad_token_id = 0):
         self.patch_size = patch_size
         self.vocab_size = vocab_size
         self.masking_ratio = masking_ratio
+        self.pad_token_id = pad_token_id
 
     def batched_linear_mask(self, image_tensor : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if len(image_tensor.shape) < 4:
@@ -51,18 +52,26 @@ class LinearMaskScheduler:
 
         return masked, shuffle_forward, shuffle_backward
     
-    def batched_text_linear_mask(self, captions : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def batched_text_linear_mask(self, captions, lengths : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        B = captions.shape[0]
+
+        max_length = torch.max(lengths)
+        pad_mask = torch.arange(0, max_length, device=captions.device)[None, :] >= lengths
+        
+        # permutations = torch.rand((captions.shape[:2]), device=captions.device)
+        # permutations[pad_mask] = torch.iinfo(torch.long).max
+        # permutations = permutations.argsort(dim=-1)
         mask = torch.rand(captions.shape, dtype=torch.float, device=captions.device) < self.masking_ratio
-        noise = torch.randint_like(captions, 1, self.vocab_size)
-        corruptions = ~mask * captions + mask * noise
-        return corruptions, mask
+        corruptions = captions.clone()
+        corruptions[mask] = 103
+        return corruptions, (~pad_mask).float()
     
-    def get_masked(self, image_tensor, captions, need_masks = False):
+    def get_masked(self, image_tensor, captions, lengths, need_masks = False):
         B = image_tensor.shape[0]
         assert image_tensor.shape[0] == captions.shape[0], "Image batch size must equal caption batch size"
     
         masked_images, shuffle_forward, shuffle_backward = self.batched_linear_mask(image_tensor)
-        masked_text, text_mask = self.batched_text_linear_mask(captions)
+        masked_text, text_mask = self.batched_text_linear_mask(captions, lengths)
 
         if need_masks:
             return masked_images, masked_text, (shuffle_forward, shuffle_backward, text_mask)

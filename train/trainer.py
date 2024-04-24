@@ -170,7 +170,7 @@ class Trainer():
             epoch_image_loss.requires_grad = False
             epoch_caption_loss.requires_grad = False
 
-            for images, captions in train_dataloader:
+            for images, captions, lengths in train_dataloader:
 
                 if self.interrupt == True:
                     break
@@ -178,14 +178,15 @@ class Trainer():
                 # TODO: Loading X variables here
                 images = images.to(self.device, non_blocking=True)
                 captions = captions.to(self.device, non_blocking=True)
+                lengths = lengths.to(self.device, non_blocking=True)
 
-                masked_images, masked_text, (ip, rp, _) = self.noise_scheduler.get_masked(images, captions, need_masks=True)
+                masked_images, masked_text, (ip, rp, tm) = self.noise_scheduler.get_masked(images, captions, need_masks=True)
 
                 optimizer.zero_grad(set_to_none=True)
                 # Automatic reduced precision, makes transformers faster
                 with torch.autocast(device_type=self.device, dtype=torch.float16):
                     # Model forward step here
-                    reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, ip, rp)
+                    reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, tm, rp)
                     img_loss = self.image_criterion(reconstructed_images, images)
                     txt_loss = self.text_criterion(reconstructed_captions.permute(0, 2, 1), captions)
                     (img_loss, txt_loss) = self.scale_losses(img_loss, txt_loss)

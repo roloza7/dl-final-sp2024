@@ -16,9 +16,11 @@ import pickle
 
 def __collate_fn(data : list[tuple[torch.Tensor, torch.Tensor]], pad_id : int) -> tuple[torch.Tensor, torch.Tensor]:
     images, captions = list(zip(*data))
+    captions, lengths = list(zip(*captions))
     captions = nn.utils.rnn.pad_sequence(captions, batch_first=True, padding_value=pad_id)
+    lengths = torch.stack(lengths, dim=0)
     images = torch.stack(images, dim=0)
-    return images, captions
+    return images, captions, lengths
 
 def collate_fn(pad_id : int):
     return partial(__collate_fn, pad_id = pad_id)
@@ -83,6 +85,7 @@ class COCOAEDataset(Dataset):
             tokenized_caption = self.tokenizer.encode(ann['caption'],
                                                       return_tensors='pt',
                                                       add_special_tokens=True).squeeze() if self.tokenizer is not None else ann['caption']
+            tokenized_caption = (tokenized_caption, torch.tensor([tokenized_caption.shape[0]], dtype=torch.long))
             self.images_to_annotations[ann['image_id']].append(tokenized_caption)
 
         for img in self.dataset['images']:

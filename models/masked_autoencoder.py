@@ -2,20 +2,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# def __init__(self,
+# class MaskedAEConfig:
+#     def __init__(self,
 #                  vocab_size,
-#                  hidden_dim = 768,
+#                  encoder_hidden_dim = 1024,
+#                  decoder_hidden_dim = 512,
 #                  max_input_len = 256,
 #                  patch_size = 16,
 #                  output_size = (224, 224),
 #                  in_channels = 3,
-#                  n_encoder_heads = 12,
+#                  n_encoder_heads = 16,
 #                  dim_encoder_feedforward = 3072,
-#                  n_encoder_layers = 12,
-#                  n_decoder_heads = 12,
+#                  n_encoder_layers = 18,
+#                  n_decoder_heads = 8,
 #                  dim_decoder_feedforward = 3072,
-#                  n_decoder_layers = 4,
+#                  n_decoder_layers = 2,
 #                  ) -> None:
+        
 
 class MaskedAEConfig:
     def __init__(self,
@@ -28,10 +31,10 @@ class MaskedAEConfig:
                  in_channels = 3,
                  n_encoder_heads = 16,
                  dim_encoder_feedforward = 3072,
-                 n_encoder_layers = 18,
+                 n_encoder_layers = 16,
                  n_decoder_heads = 8,
                  dim_decoder_feedforward = 3072,
-                 n_decoder_layers = 2,
+                 n_decoder_layers = 4,
                  ) -> None:
         
         self.vocab_size = vocab_size
@@ -59,14 +62,14 @@ class MaskedAEEncoder(nn.Module):
             dim_feedforward=config.dim_encoder_feedforward,
             activation=F.gelu,
             batch_first=True,
-            norm_first=True
+            norm_first=True,
         )
 
-        self.h = nn.TransformerEncoder(transformer, config.n_encoder_layers, norm=nn.LayerNorm(config.encoder_hidden_dim))
+        self.h = nn.TransformerEncoder(transformer, config.n_encoder_layers, norm=nn.LayerNorm(config.encoder_hidden_dim), enable_nested_tensor=False)
 
-    def forward(self, embeddings):
+    def forward(self, embeddings, att_pad_mask):
         
-        return self.h(embeddings)
+        return self.h(embeddings, src_key_padding_mask=att_pad_mask)
     
 class MaskedAEDecoder(nn.Module):
     def __init__(self, config : MaskedAEConfig) -> None:
@@ -81,7 +84,7 @@ class MaskedAEDecoder(nn.Module):
             norm_first=True
         )
 
-        self.h = nn.TransformerEncoder(transformer, config.n_decoder_layers, norm=nn.LayerNorm(config.decoder_hidden_dim))
+        self.h = nn.TransformerEncoder(transformer, config.n_decoder_layers, norm=nn.LayerNorm(config.decoder_hidden_dim), enable_nested_tensor=False)
 
     def forward(self, encoded):
         
@@ -117,23 +120,24 @@ class MaskedAutoEncoder(nn.Module):
     def forward(self,
                 images : torch.Tensor,  # (B, L, E)
                 captions : torch.Tensor, # (B, L, E2)
-                patch_ids : torch.Tensor = None): # <-
+                i_position_indices : torch.Tensor = None,
+                att_pad_mask = torch.Tensor): # <-
         
-        if patch_ids == None:
-            patch_ids = torch.arange(0, images.shape[1], device=images.device, dtype=torch.long)
+        if i_position_indices == None:
+            i_position_indices = torch.arange(0, images.shape[1], device=images.device, dtype=torch.long)
         
         # Patch embeddings
         image_emb : torch.Tensor = self.ite(images)
 
         # Add positional embeddings
-        image_emb = image_emb + self.ipe(patch_ids)
+        image_emb = image_emb + self.ipe(i_position_indices)
      
         # Token embeddings
         word_emb = self.wte(captions) # <- (B, L, hidden_dim)
         word_emb = word_emb + self.wpe(torch.arange(0, word_emb.shape[1], device=captions.device, dtype=torch.long).unsqueeze(0))
 
         full_emb = torch.cat([image_emb, word_emb], dim=1)
-        encoded = self.encoder(full_emb)
+        encoded = self.encoder(full_emb, att_pad_mask)
 
         return encoded
 
@@ -172,13 +176,17 @@ class MaskedAutoEncoderForPretraining(nn.Module):
     def forward(self, 
                 images : torch.Tensor,  # (B, L, E)
                 captions : torch.Tensor, # (B, L, E2)
-                patch_ids : torch.Tensor, # <-
+                text_mask : torch.Tensor, # <-
                 reverse_ids : torch.Tensor):
         
+        B = captions.shape[0]
         word_seq_len = captions.shape[1]
         image_seq_len = images.shape[1]
+        image_attentions = torch.ones((B, image_seq_len), device=images.device, dtype=torch.float)
+        total_attentions = torch.cat([image_attentions, text_mask], dim=1)
+        total_attentions = (1 - total_attentions) * torch.finfo(torch.float).min
 
-        encoded = self.transformer(images, captions, patch_ids=patch_ids)
+        encoded = self.transformer(images, captions, i_position_indices=reverse_ids[:, :image_seq_len], att_pad_mask = total_attentions)
 
         # Prepare sequence for decoding
         encoded_img = encoded[:, :image_seq_len, :]

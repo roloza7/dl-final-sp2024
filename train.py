@@ -78,7 +78,7 @@ if __name__ == "__main__":
         model = model.to(device)
 
     image_criterion = nn.HuberLoss()
-    text_criterion = nn.CrossEntropyLoss()
+    text_criterion = nn.CrossEntropyLoss(ignore_index=dataset.tokenizer.pad_token_id)
 
     print("== Loading Trainer ==")
     trainer = Trainer(

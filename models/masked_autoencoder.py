@@ -185,7 +185,7 @@ class MaskedAutoEncoderForPretraining(nn.Module):
         image_rec = self.im_head(image_emb)
         
         folded_image_rec = F.fold(image_rec.permute(0, 2, 1), output_size=self.output_size, kernel_size=(self.patch_size, self.patch_size), stride=(self.patch_size, self.patch_size))
-        folded_image_rec = F.sigmoid(folded_image_rec)
+        folded_image_rec = folded_image_rec
 
         return folded_image_rec, captions_rec
         

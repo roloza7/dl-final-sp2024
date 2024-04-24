@@ -76,6 +76,9 @@ class Trainer():
         self.train_loss = []
         self.epoch = -1
 
+        self.max_image_loss = None
+        self.max_text_loss = None
+
 
     """
     Prepare dataloders for training
@@ -120,13 +123,6 @@ class Trainer():
             'start_time': time.time()
         }
         
-        # Load running stats
-        if load_path != None:
-            stats = torch.load("running_stats.pkl")
-            if self.head:
-                self.val_loss = stats['val_loss']
-                self.train_loss = stats['train_loss']
-
         # Enable distributed training
         if self.parallel:
             if self.local_rank == None:
@@ -144,27 +140,20 @@ class Trainer():
         # Get datasets
         train_dataloader, val_dataloader = self.__prepare_dataloaders(batch_size, num_workers, val_batch_size)
 
-        # Load Stuff
-        if load_path != None:
-            self.epoch, lr_state_dict = self.load_state_dict(self.model, optimizer, lr_scheduler, scaler, load_path, map_location=map_location)
-            if self.parallel:
-                dist.barrier()
-
-        # Optional lr scheduler
-
-
+        # Optional LR Scheduler
         if self.lr_sched != None:
             lr_scheduler : torch.optim.lr_scheduler._LRScheduler = self.lr_sched(optimizer, T_max=len(train_dataloader) , last_epoch=self.epoch, **self.lr_sched_args)
             lr_warmup = torch.optim.lr_scheduler.LinearLR(optimizer, 0.000001, 1, total_iters=20 * len(val_dataloader), last_epoch=self.epoch)
             main_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, [lr_warmup, lr_scheduler], [20 * len(val_dataloader)], last_epoch=self.epoch)
-            if load_path != None:
-                main_scheduler.load_state_dict(lr_state_dict)
+
+        # Load Stuff
+        if load_path != None:
+            self.load_state_dict(self.model, optimizer, main_scheduler, scaler, load_path, map_location=map_location)
+            if self.parallel:
+                dist.barrier()
                 
         if self.head:
             self.logger.log("Starting training...")
-
-        max_text_loss = None
-        max_image_loss = None
 
         for epoch in range(max(self.epoch, 0), n_epochs):
             self.model.train()
@@ -183,7 +172,6 @@ class Trainer():
                 if self.interrupt == True:
                     break
 
-                
                 # TODO: Loading X variables here
                 images = images.to(self.device, non_blocking=True)
                 captions = captions.to(self.device, non_blocking=True)
@@ -197,7 +185,7 @@ class Trainer():
                     reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, ip, rp)
                     img_loss = self.image_criterion(reconstructed_images, images)
                     txt_loss = self.text_criterion(reconstructed_captions.permute(0, 2, 1), captions)
-                    (img_loss, txt_loss), (max_image_loss, max_text_loss) = self.scale_losses(max_image_loss, max_text_loss, img_loss, txt_loss)
+                    (img_loss, txt_loss) = self.scale_losses(img_loss, txt_loss)
                     loss = img_loss + txt_loss
                     
                 epoch_image_loss += img_loss.detach() / len(train_dataloader)
@@ -232,13 +220,13 @@ class Trainer():
 
             if self.head:
                 self.logger.log(f"Saving Checkpoint...")
-                self.save_state_dict(self.model, optimizer, main_scheduler, scaler, epoch, save_path)
+                self.save_state_dict(self.model, optimizer, main_scheduler, scaler, save_path)
                 torch.save({'val_loss': self.val_loss, 'train_loss': self.train_loss, 'epoch': epoch }, f"running_stats.pkl")
 
             if self.parallel:
                 # Sync everyone again
                 dist.barrier()
-                self.load_model_only(self.model, save_path, epoch, map_location)
+                self.load_model_only(self.model, save_path, map_location)
 
             for hook in self.epoch_end_hooks:
                 hook(state_dict)
@@ -279,18 +267,19 @@ class Trainer():
                         optimizer : torch.optim.Optimizer,
                         lr_scheduler : torch.optim.lr_scheduler._LRScheduler,
                         scaler : GradScaler,
-                        epoch : int,
                         save_path : str):
         
-        model_path = os.path.join(save_path, f"model_{epoch}.pkl")
-        trainer_path = os.path.join(save_path, f"trainer_{epoch}.pkl")
+        model_path = os.path.join(save_path, f"model_{self.epoch}.pkl")
+        trainer_path = os.path.join(save_path, f"trainer_{self.epoch}.pkl")
 
         torch.save(model.state_dict(), model_path)
         trainer_state_dict = {
             'optimizer' : optimizer.state_dict(),
             'lr_scheduler' : lr_scheduler.state_dict(),
             'scaler' : scaler.state_dict(),
-            'epoch' : epoch
+            'epoch' : self.epoch,
+            'max_image_loss': self.max_image_loss,
+            'max_text_loss': self.max_text_loss,
         }
         torch.save(trainer_state_dict, trainer_path)
 
@@ -300,44 +289,44 @@ class Trainer():
                         lr_scheduler : torch.optim.lr_scheduler._LRScheduler,
                         scaler : GradScaler,
                         save_path : str,
-                        epoch : int = None,
                         map_location = None):
         
-        if epoch == None:
-            epoch = 0
-            for filename in os.listdir(save_path):
-                epoch = max(epoch, int(filename[:-4].split("_")[1]))
+        self.epoch = -1
+        for filename in os.listdir(save_path):
+            self.epoch = max(self.epoch, int(filename[:-4].split("_")[1]))
         
-        model_path = os.path.join(save_path, f"model_{epoch}.pkl")
-        trainer_path = os.path.join(save_path, f"trainer_{epoch}.pkl")
+        model_path = os.path.join(save_path, f"model_{self.epoch}.pkl")
+        trainer_path = os.path.join(save_path, f"trainer_{self.epoch}.pkl")
 
         model.load_state_dict(
             torch.load(model_path, map_location=map_location)
         )
         trainer_state_dict = torch.load(trainer_path)
         optimizer.load_state_dict(trainer_state_dict['optimizer'])
+        lr_scheduler.load_state_dict(trainer_state_dict['lr_scheduler'])
         scaler.load_state_dict(trainer_state_dict['scaler'])
-        return epoch, trainer_state_dict['lr_scheduler']
+        self.epoch = trainer_state_dict['epoch']
+        self.max_image_loss = trainer_path['max_image_loss'].to(self.device, non_blocking=True)
+        self.max_text_loss = trainer_path['max_text_loss'].to(self.device, non_blocking=True)
         
     def load_model_only(self,
                         model : nn.Module,
                         load_path : str,
-                        epoch : int,
                         map_location):
         
-        model_path = os.path.join(load_path, f"model_{epoch}.pkl")
+        model_path = os.path.join(load_path, f"model_{self.epoch}.pkl")
 
         model.load_state_dict(
             torch.load(model_path, map_location=map_location)
         )
 
-    def scale_losses(self, max_image_loss, max_text_loss, image_loss, text_loss):
-        if max_image_loss == None or max_image_loss < image_loss:
-            max_image_loss = image_loss.detach()
-        if max_text_loss == None or max_text_loss < text_loss:
-            max_text_loss = text_loss.detach()
+    def scale_losses(self, image_loss, text_loss):
+        if self.max_image_loss == None or self.max_image_loss < image_loss:
+            self.max_image_loss = image_loss.detach()
+        if self.max_text_loss == None or self.max_text_loss < text_loss:
+            self.max_text_loss = text_loss.detach()
 
-        image_loss = image_loss / max_image_loss
-        text_loss = text_loss / max_text_loss
+        image_loss = image_loss / self.max_image_loss
+        text_loss = text_loss / self.max_text_loss
 
-        return ((image_loss, text_loss), (max_image_loss, max_text_loss))
+        return (image_loss, text_loss)

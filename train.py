@@ -77,7 +77,7 @@ if __name__ == "__main__":
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = model.to(device)
 
-    image_criterion = nn.MSELoss()
+    image_criterion = nn.BCEWithLogitsLoss()
     text_criterion = nn.CrossEntropyLoss()
 
     print("== Loading Trainer ==")
@@ -87,9 +87,9 @@ if __name__ == "__main__":
         image_criterion=image_criterion,
         text_criterion=text_criterion,
         optimizer=torch.optim.AdamW,
-        optimizer_args= {'lr': 1.5e-5, 'betas': (0.9, 0.95), 'weight_decay': 1e-3},
+        optimizer_args= {'lr': 1.5e-4, 'betas': (0.9, 0.95), 'weight_decay': 0.05},
         lr_sched=torch.optim.lr_scheduler.CosineAnnealingLR,
-        lr_sched_args= {'eta_min': 1e-12},
+        lr_sched_args= {'eta_min': 0},
         noise_scheduler=LinearMaskScheduler(vocab_size),
         validation_dataset=val_dataset,
         collate_fn=collate_fn(pad_id),

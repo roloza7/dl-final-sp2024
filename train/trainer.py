@@ -204,6 +204,8 @@ class Trainer():
 
             self.epoch = epoch
             # Gathering loss data (this is just for analytics)
+            if epoch == 0:
+                print(f"Rank {self.rank} done!")
             if self.parallel:
                 dist.all_reduce(epoch_image_loss, op=dist.ReduceOp.AVG)
                 dist.all_reduce(epoch_caption_loss, op=dist.ReduceOp.AVG)

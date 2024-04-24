@@ -310,8 +310,8 @@ class Trainer():
         lr_scheduler.load_state_dict(trainer_state_dict['lr_scheduler'])
         scaler.load_state_dict(trainer_state_dict['scaler'])
         self.epoch = trainer_state_dict['epoch']
-        self.max_image_loss = trainer_path['max_image_loss'].to(self.device, non_blocking=True)
-        self.max_text_loss = trainer_path['max_text_loss'].to(self.device, non_blocking=True)
+        self.max_image_loss = trainer_state_dict['max_image_loss'].to(self.device, non_blocking=True)
+        self.max_text_loss = trainer_state_dict['max_text_loss'].to(self.device, non_blocking=True)
         
     def load_model_only(self,
                         model : nn.Module,

@@ -149,6 +149,7 @@ class MaskedAutoEncoderForPretraining(nn.Module):
 
         # Decoder positional embedding
         self.dpe = nn.Embedding(config.max_input_len * 2, config.encoder_hidden_dim)
+        self.wdpe = nn.Embedding(config.max_input_len, config.encoder_hidden_dim)
 
         self.pred_seq_len = config.prediction_sequence_length
         self.output_size = config.output_size
@@ -198,7 +199,7 @@ class MaskedAutoEncoderForPretraining(nn.Module):
         encoded_img = torch.gather(encoded_img, dim=1, index=reverse_ids.unsqueeze(-1).expand(encoded_img.shape))
         
         encoded_img = encoded_img + self.dpe(torch.arange(0, self.pred_seq_len, device=encoded_img.device))
-        encoded_text = encoded_text + self.transformer.wpe(torch.arange(0, word_seq_len, device=encoded_text.device, dtype=torch.long))
+        encoded_text = encoded_text + self.wdpe(torch.arange(0, word_seq_len, device=encoded_text.device, dtype=torch.long))
 
         encoded = torch.cat([encoded_img, encoded_text], dim=1)
 

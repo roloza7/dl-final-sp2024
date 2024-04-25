@@ -170,9 +170,6 @@ class Trainer():
             epoch_image_loss.requires_grad = False
             epoch_caption_loss.requires_grad = False
 
-            if self.head and epoch == 0:
-                self.logger.log("Initializing inner loop")
-
             for images, captions, lengths in train_dataloader:
 
                 if self.interrupt == True:
@@ -183,27 +180,18 @@ class Trainer():
                 captions = captions.to(self.device, non_blocking=True)
                 lengths = lengths.to(self.device, non_blocking=True)
 
-                if self.head and epoch == 0:
-                    self.logger.log("Noising...")
-
-                masked_images, masked_text, (ip, rp, tm) = self.noise_scheduler.get_masked(images, captions, lengths, need_masks=True)
+                masked_images, masked_text, corruption_targets, (image_positions, text_pad_mask) = self.noise_scheduler.get_masked(images, captions, lengths, need_masks=True)
 
                 optimizer.zero_grad(set_to_none=True)
-
-                if self.head and epoch == 0:
-                    self.logger.log("Running inference step...")
 
                 # Automatic reduced precision, makes transformers faster
                 with torch.autocast(device_type=self.device, dtype=torch.float16):
                     # Model forward step here
-                    reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, tm, rp)
+                    reconstructed_images, reconstructed_captions = self.model(masked_images, masked_text, text_pad_mask, image_positions)
                     img_loss = self.image_criterion(reconstructed_images, images)
-                    txt_loss = self.text_criterion(reconstructed_captions.permute(0, 2, 1), captions)
+                    txt_loss = self.text_criterion(reconstructed_captions, corruption_targets)
                     (img_loss, txt_loss) = self.scale_losses(img_loss, txt_loss)
                     loss = img_loss + txt_loss
-                    
-                if self.head and epoch == 0:
-                    self.logger.log("Collecting running stats...")
 
                 epoch_image_loss += img_loss.detach() / len(train_dataloader)
                 epoch_caption_loss += txt_loss.detach() / len(train_dataloader)
@@ -264,12 +252,12 @@ class Trainer():
                 captions = captions.to(self.device, non_blocking=True)
                 lengths = lengths.to(self.device, non_blocking=True)
 
-                masked_images, masked_text, (ip, rp, tm) = self.noise_scheduler.get_masked(images, captions, lengths, need_masks=True)
+                masked_images, masked_text, corruption_targets, (image_positions, text_pad_mask) = self.noise_scheduler.get_masked(images, captions, lengths, need_masks=True)
 
                 with torch.autocast(device_type=self.device, dtype=torch.float16):
-                    reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, tm, rp)
+                    reconstructed_images, reconstructed_captions = self.model.forward(masked_images, masked_text, text_pad_mask, image_positions)
                     img_loss = self.image_criterion(reconstructed_images, images)
-                    txt_loss = self.text_criterion(reconstructed_captions.permute(0, 2, 1), captions)
+                    txt_loss = self.text_criterion(reconstructed_captions, corruption_targets)
                     
                 epoch_image_loss += img_loss.cpu().item() / len(val_dataloader)
                 epoch_caption_loss += txt_loss.cpu().item() / len(val_dataloader)                    

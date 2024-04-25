@@ -26,11 +26,12 @@ def mask_image(image_tensor, patch_size, masking_ratio=0.75):
     return masked_image, mask
 
 class LinearMaskScheduler:
-    def __init__(self, vocab_size, masking_ratio = 0.75, patch_size = 16, pad_token_id = 0):
+    def __init__(self, vocab_size, masking_ratio = 0.75, patch_size = 16, pad_token_id = 0, text_skip = 2):
         self.patch_size = patch_size
         self.vocab_size = vocab_size
         self.masking_ratio = masking_ratio
         self.pad_token_id = pad_token_id
+        self.text_skip = text_skip
 
     def batched_linear_mask(self, image_tensor : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if len(image_tensor.shape) < 4:
@@ -50,7 +51,7 @@ class LinearMaskScheduler:
         shuffle_forward = permutations[:, :idx_to_keep]
         masked = torch.gather(folded, dim=1, index=shuffle_forward.unsqueeze(-1).expand((shuffle_forward.shape) + (folded.shape[-1],)))
 
-        return masked, shuffle_forward, shuffle_backward
+        return masked, shuffle_backward
     
     def batched_text_linear_mask(self, captions, lengths : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         B = captions.shape[0]
@@ -58,25 +59,31 @@ class LinearMaskScheduler:
         max_length = torch.max(lengths)
         pad_mask = torch.arange(0, max_length, device=captions.device)[None, :] >= lengths
         
-        # permutations = torch.rand((captions.shape[:2]), device=captions.device)
-        # permutations[pad_mask] = torch.iinfo(torch.long).max
-        # permutations = permutations.argsort(dim=-1)
-        mask = torch.rand(captions.shape, dtype=torch.float, device=captions.device) < self.masking_ratio
-        corruptions = captions.clone()
-        corruptions[mask] = 103
-        return corruptions, (~pad_mask).float()
+        permutations = torch.rand((captions.shape[:2]), device=captions.device)
+        permutations[pad_mask] = torch.iinfo(torch.long).max
+        permutations = permutations.argsort(dim=-1)
+        permutations = permutations[:, ::2]
+        
+        corruptions = torch.gather(captions, dim=1, index=permutations)
+
+        # Change permutations to permutations [:, 1::2] for no-reconstruction loss
+        text_targets = torch.zeros((B, self.vocab_size), device=captions.device, dtype=torch.long).scatter_(dim=1, index=captions, src=torch.ones_like(captions)).float()
+        # Ignore padding tokens
+        text_targets[:, 0] = 0
+        
+        return corruptions, (~pad_mask[:, ::2]).contiguous().float(), text_targets
     
     def get_masked(self, image_tensor, captions, lengths, need_masks = False):
         B = image_tensor.shape[0]
         assert image_tensor.shape[0] == captions.shape[0], "Image batch size must equal caption batch size"
     
-        masked_images, shuffle_forward, shuffle_backward = self.batched_linear_mask(image_tensor)
-        masked_text, text_mask = self.batched_text_linear_mask(captions, lengths)
+        masked_images, shuffle_backward = self.batched_linear_mask(image_tensor)
+        masked_text, text_pad_mask, text_targets = self.batched_text_linear_mask(captions, lengths)
 
         if need_masks:
-            return masked_images, masked_text, (shuffle_forward, shuffle_backward, text_mask)
+            return masked_images, masked_text, text_targets, (shuffle_backward, text_pad_mask)
 
-        return masked_images, masked_text
+        return masked_images, masked_text, text_targets
     
 class NoiseScheduler:
     def __init__(self, num_steps, beta_start = 0.0001, beta_end = 0.02, device = "cpu"):

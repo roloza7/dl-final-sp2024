@@ -77,8 +77,8 @@ if __name__ == "__main__":
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = model.to(device)
 
-    image_criterion = nn.HuberLoss()
-    text_criterion = nn.CrossEntropyLoss(ignore_index=dataset.tokenizer.pad_token_id)
+    image_criterion = nn.MSELoss()
+    text_criterion = nn.MSELoss()
 
     print("== Loading Trainer ==")
     trainer = Trainer(

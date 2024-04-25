@@ -13,6 +13,7 @@ from transformers import PreTrainedTokenizerFast
 import torch.nn as nn
 from functools import partial
 import pickle
+import nltk
 
 def __collate_fn(data : list[tuple[torch.Tensor, torch.Tensor]], pad_id : int) -> tuple[torch.Tensor, torch.Tensor]:
     images, captions = list(zip(*data))
@@ -50,6 +51,7 @@ class COCOAEDataset(Dataset):
         self.train = train
         self.ignore_cache = ignore_cache
         self.cache_dir = cache_dir
+        self.ALLOWED_TAGS = ('NN', 'NNP', 'NNS', 'VB', 'VBD', 'VBG', 'VBP', 'VBZ', 'JJ', 'JJS')
 
         with open(annFile, "r") as fp:
             self.dataset = json.load(fp)
@@ -82,9 +84,12 @@ class COCOAEDataset(Dataset):
 
     def __create_index(self):
         for ann in self.dataset['annotations']:
-            tokenized_caption = self.tokenizer.encode(ann['caption'],
+            tags = nltk.pos_tag(nltk.word_tokenize(ann['caption']))
+            filtered = " ".join([word for word, pos in tags if pos in self.ALLOWED_TAGS])
+            tokenized_caption = self.tokenizer.encode(filtered,
                                                       return_tensors='pt',
-                                                      add_special_tokens=True).squeeze() if self.tokenizer is not None else ann['caption']
+                                                      add_special_tokens=False).squeeze() if self.tokenizer is not None else ann['caption']
+            tokenized_caption = torch.atleast_1d(tokenized_caption)
             tokenized_caption = (tokenized_caption, torch.tensor([tokenized_caption.shape[0]], dtype=torch.long))
             self.images_to_annotations[ann['image_id']].append(tokenized_caption)
 

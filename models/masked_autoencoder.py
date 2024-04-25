@@ -67,7 +67,7 @@ class MaskedAEEncoder(nn.Module):
 
         self.h = nn.TransformerEncoder(transformer, config.n_encoder_layers, norm=nn.LayerNorm(config.encoder_hidden_dim), enable_nested_tensor=False)
 
-    def forward(self, embeddings, att_pad_mask):
+    def forward(self, embeddings, att_pad_mask = None):
         
         return self.h(embeddings, src_key_padding_mask=att_pad_mask)
     
@@ -99,12 +99,8 @@ class MaskedAutoEncoder(nn.Module):
         # Patch positional embedding
         self.ipe = nn.Embedding(config.max_input_len, config.encoder_hidden_dim)
 
-        self.pred_seq_len = config.prediction_sequence_length
-
         # Word token embedding
         self.wte = nn.Embedding(config.vocab_size, config.encoder_hidden_dim)
-        # Word positional embedding
-        self.wpe = nn.Embedding(config.max_input_len, config.encoder_hidden_dim)
 
         self.encoder = MaskedAEEncoder(config)
 
@@ -132,9 +128,8 @@ class MaskedAutoEncoder(nn.Module):
         # Add positional embeddings
         image_emb = image_emb + self.ipe(i_position_indices)
      
-        # Token embeddings
+        # Token embeddings (no positional embedding anymore since we're doing tags in v3)
         word_emb = self.wte(captions) # <- (B, L, hidden_dim)
-        word_emb = word_emb + self.wpe(torch.arange(0, word_emb.shape[1], device=captions.device, dtype=torch.long).unsqueeze(0))
 
         full_emb = torch.cat([image_emb, word_emb], dim=1)
         encoded = self.encoder(full_emb, att_pad_mask)
@@ -148,8 +143,8 @@ class MaskedAutoEncoderForPretraining(nn.Module):
         self.transformer = MaskedAutoEncoder(config)
 
         # Decoder positional embedding
-        self.dpe = nn.Embedding(config.max_input_len * 2, config.encoder_hidden_dim)
-        self.wdpe = nn.Embedding(config.max_input_len, config.encoder_hidden_dim)
+        self.decoder_patch_pos = nn.Embedding(config.max_input_len, config.encoder_hidden_dim)
+        self.word_cls_token = nn.Parameter(torch.zeros(1, 1, config.encoder_hidden_dim))
 
         self.pred_seq_len = config.prediction_sequence_length
         self.output_size = config.output_size
@@ -161,15 +156,15 @@ class MaskedAutoEncoderForPretraining(nn.Module):
 
         # Modelling heads
         self.lm_head = nn.Sequential(
-            nn.Linear(config.decoder_hidden_dim, 2048),
+            nn.Linear(config.decoder_hidden_dim, 3072),
             nn.LeakyReLU(0.2),
-            nn.Linear(2048, config.vocab_size)
+            nn.Linear(3072, config.vocab_size)
         )
 
         self.im_head = nn.Sequential(
-            nn.Linear(config.decoder_hidden_dim, 2048),
+            nn.Linear(config.decoder_hidden_dim, 3072),
             nn.LeakyReLU(0.2),
-            nn.Linear(2048, config.in_channels * config.patch_size ** 2)
+            nn.Linear(3072, config.in_channels * config.patch_size ** 2)
         )
 
 
@@ -181,8 +176,9 @@ class MaskedAutoEncoderForPretraining(nn.Module):
                 reverse_ids : torch.Tensor):
         
         B = captions.shape[0]
-        word_seq_len = captions.shape[1]
+
         image_seq_len = images.shape[1]
+
         image_attentions = torch.ones((B, image_seq_len), device=images.device, dtype=torch.float)
         total_attentions = torch.cat([image_attentions, text_mask], dim=1)
         total_attentions = (1 - total_attentions) * torch.finfo(torch.float).min
@@ -191,29 +187,33 @@ class MaskedAutoEncoderForPretraining(nn.Module):
 
         # Prepare sequence for decoding
         encoded_img = encoded[:, :image_seq_len, :]
-        encoded_text = encoded[:, -word_seq_len:, :]
+        encoded_text = encoded[:, image_seq_len:, :]
 
         mask_fill_size = (encoded_img.shape[0], self.pred_seq_len - image_seq_len, encoded_img.shape[-1])
         encoded_img = torch.cat([encoded_img, self.transformer.mask_token.expand(mask_fill_size)], dim=1)
 
         encoded_img = torch.gather(encoded_img, dim=1, index=reverse_ids.unsqueeze(-1).expand(encoded_img.shape))
         
-        encoded_img = encoded_img + self.dpe(torch.arange(0, self.pred_seq_len, device=encoded_img.device))
-        encoded_text = encoded_text + self.wdpe(torch.arange(0, word_seq_len, device=encoded_text.device, dtype=torch.long))
+        encoded_img = encoded_img + self.decoder_patch_pos(torch.arange(0, self.pred_seq_len, device=encoded_img.device))
 
-        encoded = torch.cat([encoded_img, encoded_text], dim=1)
+        encoded = torch.cat([encoded_img, encoded_text, self.word_cls_token.expand(B, 1, encoded_text.shape[-1])], dim=1)
 
         encoded = self.transform(encoded)
 
         decoded = self.decoder(encoded)
 
         image_emb = decoded[:, :self.pred_seq_len, :]
-        word_emb = decoded[:, self.pred_seq_len:, :]
+        # (B, decoder_hidden_dim)
+        word_cls = decoded[:, -1, :]
 
-        captions_rec = self.lm_head(word_emb)
-        # (B, L, E) -> (B, E, L) -> (B, E, H, W)
+        # (B, vocab_size)
+        captions_rec = self.lm_head(word_cls)
+        captions_rec = F.sigmoid(captions_rec)
+
+        # (B, L, E) -> (B, E, L)
         image_rec = self.im_head(image_emb)
-        
+
+        # (B, L, E) -> (B, C, H, W)
         folded_image_rec = F.fold(image_rec.permute(0, 2, 1), output_size=self.output_size, kernel_size=(self.patch_size, self.patch_size), stride=(self.patch_size, self.patch_size))
         folded_image_rec = F.sigmoid(folded_image_rec)
 

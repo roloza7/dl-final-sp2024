@@ -153,7 +153,7 @@ class Trainer():
             if self.parallel:
                 dist.barrier()
                 
-        for param in self.model.transformer.parameters():
+        for param in self.model.module.transformer.parameters():
             param.requires_grad = False
 
         if self.head:

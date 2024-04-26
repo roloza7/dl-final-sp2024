@@ -153,6 +153,9 @@ class Trainer():
             if self.parallel:
                 dist.barrier()
                 
+        for param in self.model.transformer.parameters():
+            param.requires_grad = False
+
         if self.head:
             self.logger.log("Starting training...")
 
@@ -176,6 +179,7 @@ class Trainer():
                     break
 
                 # TODO: Loading X variables here
+                images = images.to(self.device, non_blocking=True)
                 captions = captions.to(self.device, non_blocking=True)
                 lengths = lengths.to(self.device, non_blocking=True)
 

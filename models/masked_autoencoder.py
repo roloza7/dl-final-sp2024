@@ -24,7 +24,7 @@ class MaskedAEConfig:
     def __init__(self,
                  vocab_size,
                  encoder_hidden_dim = 1024,
-                 decoder_hidden_dim = 512,
+                 decoder_hidden_dim = 768,
                  max_input_len = 256,
                  patch_size = 16,
                  output_size = (224, 224),
@@ -117,7 +117,7 @@ class MaskedAutoEncoder(nn.Module):
                 images : torch.Tensor,  # (B, L, E)
                 captions : torch.Tensor, # (B, L, E2)
                 i_position_indices : torch.Tensor = None,
-                att_pad_mask = torch.Tensor): # <-
+                att_pad_mask : torch.Tensor = None): # <-
         
         if i_position_indices == None:
             i_position_indices = torch.arange(0, images.shape[1], device=images.device, dtype=torch.long)
@@ -222,12 +222,67 @@ class MaskedAutoEncoderForPretraining(nn.Module):
 """
 Example downstream model
 """
+class MaskedAutoEncoderForGeneration(nn.Module):
+    def __init__(self, config : MaskedAEConfig):
+        super().__init__()
+        self.transformer = MaskedAutoEncoder(config)
+
+        self.img_cls = nn.Parameter(torch.empty(1, 1, config.in_channels * config.patch_size ** 2))
+        self.img_dcd = nn.Parameter(torch.empty(1, config.prediction_sequence_length, config.encoder_hidden_dim))
+        torch.nn.init.xavier_normal_(self.img_dcd.data)
+        torch.nn.init.xavier_normal_(self.img_cls.data)
+
+        self.image_token_len = config.prediction_sequence_length
+        self.output_size = config.output_size
+        self.patch_size = config.patch_size
+
+        decoder_layer = nn.TransformerDecoderLayer(
+            config.encoder_hidden_dim,
+            config.n_encoder_heads,
+            dim_feedforward=config.dim_encoder_feedforward,
+            activation=F.gelu,
+            batch_first=True,
+            norm_first=True,
+        )
+        self.decoder = nn.TransformerDecoder(
+            decoder_layer,
+            config.n_decoder_layers,
+            norm=nn.LayerNorm(config.encoder_hidden_dim)
+        )
+        self.im_head = nn.Sequential(
+            nn.Linear(config.encoder_hidden_dim, 3072),
+            nn.LeakyReLU(0.2),
+            nn.Linear(3072, config.in_channels * config.patch_size ** 2),
+            nn.Sigmoid()
+        )
+
+    # Removing images, reverse ids just for backwards compatibility
+    def forward(self, captions, text_mask):
+
+        cls_size = (captions.shape[0], 1, self.img_cls.shape[-1])
+
+        cls_text_mask = torch.cat([torch.ones(captions.shape[0], 1, device=captions.device), text_mask], dim=1)
+        cls_text_mask = (1 - cls_text_mask) * torch.finfo(torch.float).min
+
+        # (B, L, E)
+        memory = self.transformer(self.img_cls.expand(cls_size), captions, att_pad_mask = cls_text_mask)
+
+        img_dcd_size = (captions.shape[0],) + self.img_dcd.shape[1:]
+
+        decoded = self.decoder(self.img_dcd.expand(img_dcd_size), memory, memory_key_padding_mask = cls_text_mask)
+
+        image = self.im_head(decoded)
+
+        image = F.fold(image.permute(0, 2, 1), output_size=self.output_size, kernel_size=(self.patch_size, self.patch_size), stride=(self.patch_size, self.patch_size))
+
+        return image
+
 class MaskedAutoEncoderForClassification(nn.Module):
     def __init__(self, config : MaskedAEConfig):
         super().__init__()
         self.transformer = MaskedAutoEncoder(config)
 
-    def forward(self, images, captions):
+    def forward(self, images, captions, text_mask):
 
         encoded = self.transformer(images, captions) # Can optionally pass in patch ids, if not will assume [0, 1, 2, ..., 195]
 

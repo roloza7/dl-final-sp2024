@@ -19,7 +19,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import BertTokenizerFast
 from utils.transforms import get_transform
-from models.masked_autoencoder import MaskedAutoEncoderForPretraining, MaskedAEConfig
+from models.masked_autoencoder import MaskedAutoEncoderForGeneration, MaskedAEConfig
 
 if __name__ == "__main__":
 
@@ -69,7 +69,12 @@ if __name__ == "__main__":
 
     print("== Loading Model ==")
     config = MaskedAEConfig(vocab_size=vocab_size)
-    model = MaskedAutoEncoderForPretraining(config)
+    model = MaskedAutoEncoderForGeneration(config)
+    distributed_state_dict = torch.load("checkpoints/base_0")
+    keys = list(distributed_state_dict.keys())
+    model.transformer.load_state_dict(distributed_state_dict)
+    del distributed_state_dict
+
     if PARALLEL:
         torch.cuda.set_device(local_rank)
         device = torch.device("cuda")
@@ -87,7 +92,7 @@ if __name__ == "__main__":
         image_criterion=image_criterion,
         text_criterion=text_criterion,
         optimizer=torch.optim.AdamW,
-        optimizer_args= {'lr': 1.5e-4, 'betas': (0.9, 0.95), 'weight_decay': 0.05},
+        optimizer_args= {'lr': 4e-5, 'betas': (0.9, 0.95), 'weight_decay': 0.001},
         lr_sched=torch.optim.lr_scheduler.CosineAnnealingLR,
         lr_sched_args= {'eta_min': 0},
         noise_scheduler=LinearMaskScheduler(vocab_size),
@@ -96,7 +101,7 @@ if __name__ == "__main__":
         parallel=PARALLEL,
         num_replicas=size if PARALLEL else None,
         rank=rank if PARALLEL else None,
-        local_rank=local_rank if PARALLEL else None
+        local_rank=local_rank if PARALLEL else None,
     )
 
     # def usr1_sig_handler(signum, frame):

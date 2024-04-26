@@ -1,10 +1,11 @@
 __author__ = 'tylin'
-from tokenizer.ptbtokenizer import PTBTokenizer
-from bleu.bleu import Bleu
-from meteor.meteor import Meteor
-from rouge.rouge import Rouge
-from cider.cider import Cider
-from spice.spice import Spice
+from .tokenizer.ptbtokenizer import PTBTokenizer
+from .bleu.bleu import Bleu
+from .meteor.meteor import Meteor
+from .rouge.rouge import Rouge
+from .cider.cider import Cider
+from .spice.spice import Spice
+
 
 class COCOEvalCap:
     def __init__(self, coco, cocoRes):
@@ -40,25 +41,25 @@ class COCOEvalCap:
             (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
             (Meteor(),"METEOR"),
             (Rouge(), "ROUGE_L"),
-            (Cider(), "CIDEr"),
-            (Spice(), "SPICE")
+            (Cider(), "CIDEr")
+            # (Spice(), "SPICE")
         ]
 
         # =================================================
         # Compute scores
         # =================================================
         for scorer, method in scorers:
-            print(f'computing {scorer.method()} score...')
+            print('computing %s score...'%(scorer.method()))
             score, scores = scorer.compute_score(gts, res)
             if type(method) == list:
                 for sc, scs, m in zip(score, scores, method):
                     self.setEval(sc, m)
                     self.setImgToEvalImgs(scs, gts.keys(), m)
-                    print(f"{m}: {sc:.3f}")
+                    print("%s: %0.3f"%(m, sc))
             else:
                 self.setEval(score, method)
                 self.setImgToEvalImgs(scores, gts.keys(), method)
-                print(f"{method}: {score:.3f}")
+                print("%s: %0.3f"%(method, score))
         self.setEvalImgs()
 
     def setEval(self, score, method):

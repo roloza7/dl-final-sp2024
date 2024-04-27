@@ -24,7 +24,7 @@ class MaskedAEConfig:
     def __init__(self,
                  vocab_size,
                  encoder_hidden_dim = 1024,
-                 decoder_hidden_dim = 768,
+                 decoder_hidden_dim = 1024,
                  max_input_len = 256,
                  patch_size = 16,
                  output_size = (224, 224),
@@ -35,6 +35,7 @@ class MaskedAEConfig:
                  n_decoder_heads = 8,
                  dim_decoder_feedforward = 3072,
                  n_decoder_layers = 10,
+                 max_caption_length = 10,
                  ) -> None:
         
         self.vocab_size = vocab_size
@@ -48,6 +49,7 @@ class MaskedAEConfig:
         self.n_decoder_heads = n_decoder_heads
         self.dim_decoder_feedforward = dim_decoder_feedforward
         self.n_decoder_layers = n_decoder_layers
+        self.max_caption_length = max_caption_length
         self.in_channels = in_channels
         self.prediction_sequence_length = int((output_size[0] // patch_size) * (output_size[1] // patch_size))
         self.output_size = output_size
@@ -129,8 +131,10 @@ class MaskedAutoEncoder(nn.Module):
         image_emb = image_emb + self.ipe(i_position_indices)
      
         # Token embeddings (no positional embedding anymore since we're doing tags in v3)
-        word_emb = self.wte(captions) # <- (B, L, hidden_dim)
-
+        # print(captions.shape)
+        # word_emb = self.wte(captions) # <- (B, L, hidden_dim)
+        word_emb = captions
+        # print(image_emb.shape, word_emb.shape)
         full_emb = torch.cat([image_emb, word_emb], dim=1)
         encoded = self.encoder(full_emb, att_pad_mask)
 
@@ -290,5 +294,58 @@ class MaskedAutoEncoderForClassification(nn.Module):
         return None
 
 # Captioning
+    
+class MaskedAutoEncoderForCaptioning(nn.Module):
+    def __init__(self, config: MaskedAEConfig):
+        super().__init__()
+        self.transformer = MaskedAutoEncoder(config)
+
+        self.img_emb = nn.Parameter(torch.empty(1, config.prediction_sequence_length, config.encoder_hidden_dim))
+        torch.nn.init.xavier_normal_(self.img_emb.data)
+
+        self.dummy_input = nn.Parameter(torch.empty(1, 1, config.encoder_hidden_dim))
+        # print(self.dummy_input.shape, "shape")
+        torch.nn.init.xavier_normal_(self.dummy_input.data)
+
+        self.text_emb = nn.Parameter(torch.empty(1, config.max_caption_length, config.encoder_hidden_dim))
+        torch.nn.init.xavier_normal_(self.text_emb.data)
+
+        decoder_layer = nn.TransformerDecoderLayer(
+            config.decoder_hidden_dim,
+            config.n_decoder_heads,
+            dim_feedforward=config.dim_decoder_feedforward,
+            activation=F.gelu,
+            batch_first=True,
+            norm_first=True,
+        )
+        self.decoder = nn.TransformerDecoder(
+            decoder_layer,
+            config.n_decoder_layers,
+            norm=nn.LayerNorm(config.decoder_hidden_dim)
+        )
+        
+        # self.caption_head = nn.Linear(config.decoder_hidden_dim, config.vocab_size)
+        self.caption_head = nn.Sequential(
+            nn.Linear(config.encoder_hidden_dim, 512),
+            nn.LeakyReLU(0.2),
+            nn.Linear(512, config.vocab_size),
+            nn.Sigmoid()
+        )
+
+    def forward(self, images):
+        batch_size = images.size(0)
+        dummy_inputs = self.dummy_input.expand(batch_size, -1, -1)
+
+        encoded_images = self.transformer(images, dummy_inputs)
+
+        text_emb_size = (images.shape[0],) + self.text_emb.shape[1:]
+
+
+        dec = self.text_emb.expand(text_emb_size)
+        # print(encoded_images.shape, dec.shape, text_emb_size)
+        decoded_captions = self.decoder(dec, encoded_images)
+        # print("output", decoded_captions)
+        captions = self.caption_head(decoded_captions)
+        return captions    
 # Regeneration
 # Classification

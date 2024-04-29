@@ -131,10 +131,10 @@ class MaskedAutoEncoder(nn.Module):
         image_emb = image_emb + self.ipe(i_position_indices)
      
         # Token embeddings (no positional embedding anymore since we're doing tags in v3)
-        # print(captions.shape)
+        
         # word_emb = self.wte(captions) # <- (B, L, hidden_dim)
         word_emb = captions
-        # print(image_emb.shape, word_emb.shape)
+        
         full_emb = torch.cat([image_emb, word_emb], dim=1)
         encoded = self.encoder(full_emb, att_pad_mask)
 
@@ -296,16 +296,18 @@ class MaskedAutoEncoderForClassification(nn.Module):
 # Captioning
     
 class MaskedAutoEncoderForCaptioning(nn.Module):
-    def __init__(self, config: MaskedAEConfig):
+    def __init__(self, config: MaskedAEConfig, pretrained=None):
         super().__init__()
-        self.transformer = MaskedAutoEncoder(config)
-
-        self.img_emb = nn.Parameter(torch.empty(1, config.prediction_sequence_length, config.encoder_hidden_dim))
-        torch.nn.init.xavier_normal_(self.img_emb.data)
+        if pretrained == None:
+            self.transformer = MaskedAutoEncoder(config)
+        else:
+            self.transformer = pretrained
+        # self.transformer = model
 
         self.dummy_input = nn.Parameter(torch.empty(1, 1, config.encoder_hidden_dim))
-        # print(self.dummy_input.shape, "shape")
         torch.nn.init.xavier_normal_(self.dummy_input.data)
+        # self.dummy_input = torch.zeros(1, 1, config.encoder_hidden_dim, requires_grad=False)
+
 
         self.text_emb = nn.Parameter(torch.empty(1, config.max_caption_length, config.encoder_hidden_dim))
         torch.nn.init.xavier_normal_(self.text_emb.data)
@@ -324,15 +326,14 @@ class MaskedAutoEncoderForCaptioning(nn.Module):
             norm=nn.LayerNorm(config.decoder_hidden_dim)
         )
         
-        # self.caption_head = nn.Linear(config.decoder_hidden_dim, config.vocab_size)
         self.caption_head = nn.Sequential(
             nn.Linear(config.encoder_hidden_dim, 512),
             nn.LeakyReLU(0.2),
             nn.Linear(512, config.vocab_size),
-            nn.Sigmoid()
+            nn.Softmax()
         )
 
-    def forward(self, images):
+    def forward(self, images, image_positions):
         batch_size = images.size(0)
         dummy_inputs = self.dummy_input.expand(batch_size, -1, -1)
 
@@ -340,10 +341,11 @@ class MaskedAutoEncoderForCaptioning(nn.Module):
 
         text_emb_size = (images.shape[0],) + self.text_emb.shape[1:]
 
-
         dec = self.text_emb.expand(text_emb_size)
         # print(encoded_images.shape, dec.shape, text_emb_size)
         decoded_captions = self.decoder(dec, encoded_images)
+        decoded_captions = decoded_captions[:, -1, :]
+
         # print("output", decoded_captions)
         captions = self.caption_head(decoded_captions)
         return captions    

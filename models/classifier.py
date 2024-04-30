@@ -4,6 +4,7 @@ from models.masked_autoencoder import MaskedAEConfig, MaskedAutoEncoder
 class ImageNetClassifier(nn.Module):
     def __init__(self, config: MaskedAEConfig, num_classes=1000):
         super().__init__()
+        self.num_classes = num_classes
         self.masked_ae = MaskedAutoEncoder(config)
         # Define a classifier that maps from the encoder hidden dimension to the number of ImageNet classes
         self.classifier = nn.Sequential(

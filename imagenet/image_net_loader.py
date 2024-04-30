@@ -10,6 +10,7 @@ class ImageNetDataset(Dataset):
         return len(self.ds)
 
     def __getitem__(self, idx):
+
         image = self.ds[idx]['image']
         label = self.ds[idx]['label']
 

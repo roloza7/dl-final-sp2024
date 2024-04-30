@@ -16,22 +16,14 @@ def custom_collate_fn(batch):
     labels = [item[1] for item in batch]
 
     # Filter out pairs where either image or caption is missing
-    filtered_batch = [(img, lbl) for img, lbl in zip(images, labels) if img is not None and lbl is not None]
+    filtered_batch = [(img, lbl) for img, lbl in zip(images, labels) if img is not None and lbl is not None and img.shape[0] == 3]
 
     # Separate images and labels from the filtered batch
-    images = [item[0].repeat(3, 1, 1) if item[0].shape[0] == 1 else item[0] for item in filtered_batch]
+    images = [item[0] for item in filtered_batch]
     labels = [[item[1]] for item in filtered_batch]
 
-    images_rgb = []
-    for img in images:
-        if img.mode == 'CMYK':
-            img = Image.fromarray(img)
-            img = img.convert('RGB')
-        images_rgb.append(img)
-    # Transform images to tensors
-    images = torch.stack(images_rgb)
+    images = torch.stack(images)
     labels = torch.tensor(labels)
-    # labels = torch.unsqueeze(labels, dim=1)
 
     return images, labels
 class ClassifierTrainer:

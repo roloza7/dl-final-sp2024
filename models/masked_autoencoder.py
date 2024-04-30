@@ -117,7 +117,7 @@ class MaskedAutoEncoder(nn.Module):
     """
     def forward(self,
                 images : torch.Tensor,  # (B, L, E)
-                captions : torch.Tensor, # (B, L, E2)
+                captions : torch.Tensor = None, # (B, L, E2)
                 i_position_indices : torch.Tensor = None,
                 att_pad_mask : torch.Tensor = None): # <-
         
@@ -132,11 +132,15 @@ class MaskedAutoEncoder(nn.Module):
      
         # Token embeddings (no positional embedding anymore since we're doing tags in v3)
         
-        # word_emb = self.wte(captions) # <- (B, L, hidden_dim)
-        word_emb = captions
-        
-        full_emb = torch.cat([image_emb, word_emb], dim=1)
+        if captions is not None:
+            
+            word_emb = self.wte(captions) # <- (B, L, hidden_dim)
+            # word_emb = captions
+            full_emb = torch.cat([image_emb, word_emb], dim=1)
+        else:
+            full_emb = image_emb
         encoded = self.encoder(full_emb, att_pad_mask)
+
 
         return encoded
 
@@ -306,8 +310,12 @@ class MaskedAutoEncoderForCaptioning(nn.Module):
 
         self.dummy_input = nn.Parameter(torch.empty(1, 1, config.encoder_hidden_dim))
         torch.nn.init.xavier_normal_(self.dummy_input.data)
-        # self.dummy_input = torch.zeros(1, 1, config.encoder_hidden_dim, requires_grad=False)
 
+        # self.dummy_input = torch.zeros(1, 1, config.encoder_hidden_dim, requires_grad=False)
+        # pass in original cpation
+        # padding mask
+
+        self.wte = nn.Embedding(config.vocab_size, config.encoder_hidden_dim)
 
         self.text_emb = nn.Parameter(torch.empty(1, config.max_caption_length, config.encoder_hidden_dim))
         torch.nn.init.xavier_normal_(self.text_emb.data)
@@ -333,18 +341,41 @@ class MaskedAutoEncoderForCaptioning(nn.Module):
             nn.Softmax()
         )
 
-    def forward(self, images, image_positions):
+    def forward(self, images, captions, pad_mask, image_positions):
         batch_size = images.size(0)
         dummy_inputs = self.dummy_input.expand(batch_size, -1, -1)
 
-        encoded_images = self.transformer(images, dummy_inputs)
+        encoded_images = self.transformer(images)
+
+        text_mask = torch.cat([torch.ones(captions.shape[0], 1, device=captions.device), pad_mask], dim=1)
+        text_mask = pad_mask
 
         text_emb_size = (images.shape[0],) + self.text_emb.shape[1:]
 
         dec = self.text_emb.expand(text_emb_size)
+        # print("dec shape", dec.shape)
         # print(encoded_images.shape, dec.shape, text_emb_size)
-        decoded_captions = self.decoder(dec, encoded_images)
-        decoded_captions = decoded_captions[:, -1, :]
+        causal_mask = torch.triu(torch.ones(text_mask.shape[1], text_mask.shape[1], device=captions.device))
+        # print(causal_mask)
+        # print(captions.dtype, encoded_images.dtype, causal_mask.dtype, text_mask.dtype)
+        # print(text_mask, causal_mask)
+        caption_embed = self.wte(captions)
+        # print(caption_embed.shape, caption_embed.dtype)
+        captions = captions.to(encoded_images.dtype)
+        # print(captions.shape)
+        # print(text_mask, pad_mask)
+        # print(causal_mask.shape, pad_mask.shape, text_mask.shape)
+
+        # print(captions.dtype, encoded_images.dtype, causal_mask.dtype, text_mask.dtype)
+
+        decoded_captions = self.decoder(tgt=caption_embed, memory=encoded_images, tgt_mask = causal_mask, tgt_key_padding_mask=text_mask, tgt_is_causal=True)
+        
+        # decoded_captions = self.decoder(dec, encoded_images, memory_key_padding_mask = causal_mask, memory_is_causal = True)
+
+        # decoded_captions = decoded_captions[:, :-1, :]
+        # decoded_captions = decoded_captions[:, -1, :]
+
+        # causal mask
 
         # print("output", decoded_captions)
         captions = self.caption_head(decoded_captions)

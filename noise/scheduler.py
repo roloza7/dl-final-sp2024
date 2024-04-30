@@ -51,7 +51,7 @@ class LinearMaskScheduler:
         shuffle_forward = permutations[:, :idx_to_keep]
         masked = torch.gather(folded, dim=1, index=shuffle_forward.unsqueeze(-1).expand((shuffle_forward.shape) + (folded.shape[-1],)))
 
-        return masked, shuffle_backward
+        return folded, shuffle_backward
     
     def batched_text_linear_mask(self, captions, lengths : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         B = captions.shape[0]
@@ -59,10 +59,10 @@ class LinearMaskScheduler:
         max_length = torch.max(lengths)
         pad_mask = torch.arange(0, max_length, device=captions.device)[None, :] >= lengths
         
-        permutations = torch.rand((captions.shape[:2]), device=captions.device)
+        permutations = torch.rand((captions.shape[:]), device=captions.device)
         permutations[pad_mask] = torch.iinfo(torch.long).max
         permutations = permutations.argsort(dim=-1)
-        permutations = permutations[:, ::2]
+        # permutations = permutations[:, ::2]
         
         corruptions = torch.gather(captions, dim=1, index=permutations)
 
@@ -71,7 +71,7 @@ class LinearMaskScheduler:
         # Ignore padding tokens
         text_targets[:, 0] = 0
         
-        return corruptions, (~pad_mask[:, ::2]).contiguous().float(), text_targets
+        return corruptions, (~pad_mask).contiguous().float(), text_targets
     
     def get_masked(self, image_tensor, captions, lengths, need_masks = False):
         B = image_tensor.shape[0]

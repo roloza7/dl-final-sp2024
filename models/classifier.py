@@ -6,6 +6,7 @@ class ImageNetClassifier(nn.Module):
         super().__init__()
         self.num_classes = num_classes
         self.masked_ae = MaskedAutoEncoder(config)
+        self.masked_ae.load_state_dict(torch.load(r"C:\Users\zacha\Downloads\\base_0"))
         # Define a classifier that maps from the encoder hidden dimension to the number of ImageNet classes
         self.classifier = nn.Sequential(
             nn.Linear(config.encoder_hidden_dim, 2048),  # Linear layer to expand the feature representation

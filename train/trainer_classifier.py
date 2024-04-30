@@ -1,8 +1,7 @@
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 import torch.nn as nn
-from PIL import Image
-import torch.nn.functional as F
+from tqdm import trange
 from models.classifier import ImageNetClassifier
 from datasets import load_dataset
 from imagenet.image_net_loader import ImageNetDataset
@@ -44,46 +43,67 @@ class ClassifierTrainer:
         scheduler = LinearMaskScheduler(self.model.num_classes, patch_size=self.model.masked_ae.patch_size)
         for epoch in range(num_epochs):
             total_loss = 0
+            total_correct = 0
+            total_samples = 0
             i = 0
-            for data, targets in self.train_loader:
-                data = scheduler.batched_linear_mask(data)[0]
-                data, targets = data.to(self.device), targets.to(self.device)
-                self.optimizer.zero_grad()
-                outputs = self.model(data, targets)
-                targets = torch.squeeze(targets)
-                loss = self.criterion(outputs, targets)
-                loss.backward()
-                self.optimizer.step()
-                total_loss += loss.item()
-                i += 1
-                if i % 10000 == 0:
-                    print(f'Epoch {i + 1}, Loss: {total_loss / len(self.train_loader)}')
-                    self.validate()
-                if i % 100000 == 0:
-                    torch.save(self.model.state_dict(), f'model_epoch_{i}.pth')
-                    torch.save(self.optimizer.state_dict(), f'optimizer_epoch_{i}.pth')
+            with trange(len(self.train_loader), unit="batch") as pbar:
+                for data, targets in self.train_loader:
+                    data = scheduler.batched_linear_mask(data)[0]
+                    data, targets = data.to(self.device), targets.to(self.device)
+                    self.optimizer.zero_grad()
+                    outputs = self.model(data, targets)
+                    targets = torch.squeeze(targets)
+                    loss = self.criterion(outputs, targets)
+                    loss.backward()
+                    self.optimizer.step()
+                    total_loss += loss.item()
+
+                    _, predicted = torch.max(outputs, 1)
+                    total_correct += (predicted == targets).sum().item()
+                    total_samples += targets.size(0)
+                    accuracy = total_correct / total_samples
+                    i += 1
+                    pbar.update(1)
+                    pbar.set_description(f'Loss: {total_loss / i}, Accuracy: {accuracy * 100:.2f}%')
+                self.validate()
+                torch.save(self.model.state_dict(), f'model_iter_{i}.pth')
+                torch.save(self.optimizer.state_dict(), f'optimizer_iter_{i}.pth')
 
 
     def validate(self):
         self.model.eval()
         total_loss = 0
+        total_correct = 0
+        total_samples = 0
         scheduler = LinearMaskScheduler(self.model.num_classes, patch_size=self.model.masked_ae.patch_size)
-        with torch.no_grad():
+
+        with torch.no_grad(), trange(len(self.val_loader), unit="batch") as pbar:
             for data, targets in self.val_loader:
                 data = scheduler.batched_linear_mask(data)[0]
                 data, targets = data.to(self.device), targets.to(self.device)
                 outputs = self.model(data, targets)
+
+                # Calculate loss
                 targets = torch.squeeze(targets)
                 loss = self.criterion(outputs, targets)
                 total_loss += loss.item()
-        print(f'Validation Loss: {total_loss / len(self.val_loader)}')
+
+                # Calculate accuracy
+                _, predicted = torch.max(outputs, 1)
+                total_correct += (predicted == targets).sum().item()
+                total_samples += targets.size(0)
+
+                accuracy = total_correct / total_samples
+
+                pbar.update(1)
+                pbar.set_description(f'Validation Loss: {total_loss / len(self.val_loader)}, Validation Accuracy: {accuracy * 100:.2f}%')
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_classes = 1000  # ImageNet classes
-    learning_rate = 1e-4
+    learning_rate = 1e-6
     batch_size = 32
-    num_epochs = 1
+    num_epochs = 6
     transform = transforms.Compose([
         transforms.Resize((224, 224)),  # Resize as per the autoencoder's expected input
         transforms.ToTensor(),
@@ -98,7 +118,7 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=False, num_workers=4)
 
     # Initialize the model
-    model = ImageNetClassifier(MaskedAEConfig(num_classes)).to(device)
+    model = ImageNetClassifier(MaskedAEConfig(30522)).to(device)
 
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()

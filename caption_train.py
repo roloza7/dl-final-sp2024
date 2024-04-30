@@ -65,7 +65,7 @@ class ClassifierTrainer:
 
                 masked_images, text, targets, (image_positions, text_pad) = self.noise_scheduler.get_masked(images, captions, lengths, need_masks=True)
                 # print(masked_images.shape, masked_text.shape)   
-                reconstructed_captions = self.model.forward(masked_images, captions, text_pad, image_positions)
+                reconstructed_captions = self.model(masked_images, captions, text_pad, image_positions)
                 if epoch % 5 == 0:
                     for c in captions:
                         print("Original:", train_dataset.dataset.tokenizer.decode(c))    
@@ -93,7 +93,7 @@ class ClassifierTrainer:
                 #     plt.imshow(image.permute(1, 2, 0).detach().cpu().numpy())
                 #     plt.show() 
                 blank_captions = torch.zeros_like(captions)
-                reconstructed_captions = self.model.forward(masked_images, blank_captions, text_pad, image_positions)
+                reconstructed_captions = self.model(masked_images, blank_captions, text_pad, image_positions)
                 for c in captions:
                     print("Original:", train_dataset.dataset.tokenizer.decode(c))    
                 for c in reconstructed_captions:
@@ -138,7 +138,10 @@ if __name__ == "__main__":
     pretrained = MaskedAutoEncoder(config).to(DEVICE)
     checkpoint = torch.load("checkpoints/base_0",map_location=DEVICE)
     pretrained.load_state_dict(checkpoint)
-    model = MaskedAutoEncoderForCaptioning(MaskedAEConfig(len(train_dataset.dataset.tokenizer)), pretrained=pretrained).to(DEVICE)
+    # model = MaskedAutoEncoderForCaptioning(MaskedAEConfig(len(train_dataset.dataset.tokenizer)), pretrained=pretrained).to(DEVICE)
+    
+    model = MaskedAutoEncoderForCaptioning(config).to(DEVICE)
+    model.transformer.load_state_dict(checkpoint)
     # optim = torch.optim.Adam(model.parameters(), lr=4e-5)
     optim = torch.optim.AdamW(model.parameters(), lr=1.5e-4, betas=(0.9, 0.95), weight_decay=0.03)
 

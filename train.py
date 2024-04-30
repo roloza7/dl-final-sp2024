@@ -7,7 +7,7 @@ multi GPU environment
 """
 import argparse
 import torch
-from torch.utils.data import random_split
+from torch.utils.data import random_split, Subset
 import torch.nn as nn
 from noise.scheduler import LinearMaskScheduler
 from utils.data import COCOAEDataset, collate_fn
@@ -19,7 +19,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import BertTokenizerFast
 from utils.transforms import get_transform
-from models.masked_autoencoder import MaskedAutoEncoderForGeneration, MaskedAEConfig
+from models.masked_autoencoder import MaskedAutoEncoder, MaskedAutoEncoderForCaptioning, MaskedAEConfig
 
 if __name__ == "__main__":
 
@@ -61,18 +61,20 @@ if __name__ == "__main__":
                         tokenizer=BertTokenizerFast.from_pretrained('bert-base-uncased', cache_dir='cache/'),
                         ignore_cache=False,
                         train=True)
-    
+    sub_dataset = Subset(dataset, range(10))
+
     vocab_size = len(dataset.tokenizer)
     pad_id = dataset.tokenizer.pad_token_id
 
-    train_dataset, val_dataset = random_split(dataset, [0.85, 0.15])
+    train_dataset, val_dataset = random_split(sub_dataset.dataset, [0.85, 0.15])
 
     print("== Loading Model ==")
     config = MaskedAEConfig(vocab_size=vocab_size)
-    model = MaskedAutoEncoderForGeneration(config)
-    distributed_state_dict = torch.load("checkpoints/base_0")
+    model = MaskedAutoEncoder(config)
+    distributed_state_dict = torch.load("checkpoints/base_0", map_location=torch.device('cpu'))
     keys = list(distributed_state_dict.keys())
-    model.transformer.load_state_dict(distributed_state_dict)
+    model.load_state_dict(distributed_state_dict)
+    model = MaskedAutoEncoderForCaptioning(config, pretrained=model)
     del distributed_state_dict
 
     if PARALLEL:
@@ -83,7 +85,7 @@ if __name__ == "__main__":
         model = model.to(device)
 
     image_criterion = nn.MSELoss()
-    text_criterion = nn.MSELoss()
+    text_criterion = torch.nn.CrossEntropyLoss()
 
     print("== Loading Trainer ==")
     trainer = Trainer(
@@ -92,7 +94,7 @@ if __name__ == "__main__":
         image_criterion=image_criterion,
         text_criterion=text_criterion,
         optimizer=torch.optim.AdamW,
-        optimizer_args= {'lr': 4e-5, 'betas': (0.9, 0.95), 'weight_decay': 0.001},
+        optimizer_args= {'lr': 5e-5, 'betas': (0.9, 0.95), 'weight_decay': 0.001},
         lr_sched=torch.optim.lr_scheduler.CosineAnnealingLR,
         lr_sched_args= {'eta_min': 0},
         noise_scheduler=LinearMaskScheduler(vocab_size),

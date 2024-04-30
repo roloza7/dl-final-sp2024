@@ -338,7 +338,7 @@ class MaskedAutoEncoderForCaptioning(nn.Module):
             nn.Linear(config.encoder_hidden_dim, 512),
             nn.LeakyReLU(0.2),
             nn.Linear(512, config.vocab_size),
-            nn.Softmax()
+            nn.Softmax(dim=1)
         )
 
     def forward(self, images, captions, pad_mask, image_positions):
@@ -355,7 +355,7 @@ class MaskedAutoEncoderForCaptioning(nn.Module):
         dec = self.text_emb.expand(text_emb_size)
         # print("dec shape", dec.shape)
         # print(encoded_images.shape, dec.shape, text_emb_size)
-        causal_mask = torch.triu(torch.ones(text_mask.shape[1], text_mask.shape[1], device=captions.device))
+        causal_mask = torch.tril(torch.ones(text_mask.shape[1], text_mask.shape[1], device=captions.device), diagonal=0)
         # print(causal_mask)
         # print(captions.dtype, encoded_images.dtype, causal_mask.dtype, text_mask.dtype)
         # print(text_mask, causal_mask)

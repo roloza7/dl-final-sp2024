@@ -153,7 +153,7 @@ class Trainer():
             if self.parallel:
                 dist.barrier()
                 
-        for param in self.model.module.transformer.parameters():
+        for param in self.model.transformer.parameters():
             param.requires_grad = False
 
         if self.head:
@@ -183,20 +183,24 @@ class Trainer():
                 captions = captions.to(self.device, non_blocking=True)
                 lengths = lengths.to(self.device, non_blocking=True)
 
-                max_length = torch.max(lengths)
-                pad_mask = torch.arange(0, max_length, device=captions.device)[None, :] < lengths
+                masked_images, masked_text, targets, (image_positions, text_pad_mask) = self.noise_scheduler.get_masked(images, captions, lengths, need_masks=True)
+                # max_length = torch.max(lengths)
+                # pad_mask = torch.arange(0, max_length, device=captions.device)[None, :] < lengths
 
                 optimizer.zero_grad(set_to_none=True)
 
                 # Automatic reduced precision, makes transformers faster
                 with torch.autocast(device_type=self.device, dtype=torch.float16):
                     # Model forward step here
-                    reconstructed_images = self.model.forward(captions, pad_mask)
-                    img_loss = self.image_criterion(reconstructed_images, images)
-                    loss = img_loss
+                    reconstructed_captions = self.model(masked_images, captions, text_pad_mask, image_positions)
+                    shifted_original = captions[:,1:]
+                    shifted_reconstructed = reconstructed_captions[:,:-1]
+                    txt_loss = self.text_criterion(shifted_reconstructed.permute(0,2,1), shifted_original)                    
+                    # txt_loss = self.text_criterion(reconstructed_captions, targets)
+                    loss = txt_loss
 
-                epoch_image_loss += img_loss.detach() / len(train_dataloader)
-                epoch_caption_loss += 0
+                epoch_image_loss += 0
+                epoch_caption_loss += txt_loss.detach() / len(train_dataloader)
 
                 # This is needed due to reduced precision, don't worry about it (or ask me)
                 scaler.scale(loss).backward()
@@ -250,19 +254,20 @@ class Trainer():
         with torch.no_grad():
             for images, captions, lengths in val_dataloader:
                 
+                images = images.to(self.device, non_blocking=True)
                 captions = captions.to(self.device, non_blocking=True)
                 lengths = lengths.to(self.device, non_blocking=True)
 
-                max_length = torch.max(lengths)
-                pad_mask = torch.arange(0, max_length, device=captions.device)[None, :] < lengths
+                masked_images, masked_text, corruption_targets, (image_positions, text_pad_mask) = self.noise_scheduler.get_masked(images, captions, lengths, need_masks=True)
 
 
                 with torch.autocast(device_type=self.device, dtype=torch.float16):
-                    reconstructed_images = self.model.forward(captions, pad_mask)
-                    img_loss = self.image_criterion(reconstructed_images, images)
-                    
-                epoch_image_loss += img_loss.cpu().item() / len(val_dataloader)
-                epoch_caption_loss += 0                    
+                    reconstructed_captions = self.model(masked_images, captions, text_pad_mask, image_positions)
+                    shifted_original = captions[:,1:]
+                    shifted_reconstructed = reconstructed_captions[:,:-1]
+                    txt_loss = self.text_criterion(shifted_reconstructed.permute(0,2,1), shifted_original)                        
+                epoch_image_loss += 0    
+                epoch_caption_loss += txt_loss.cpu().item() / len(val_dataloader)
 
         # Gather loss data
         if self.parallel:

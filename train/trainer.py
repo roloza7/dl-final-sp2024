@@ -196,7 +196,6 @@ class Trainer():
                     shifted_original = captions[:,1:]
                     shifted_reconstructed = reconstructed_captions[:,:-1]
                     txt_loss = self.text_criterion(shifted_reconstructed.permute(0,2,1), shifted_original)                    
-                    # txt_loss = self.text_criterion(reconstructed_captions, targets)
                     loss = txt_loss
 
                 epoch_image_loss += 0

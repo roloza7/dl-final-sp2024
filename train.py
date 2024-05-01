@@ -97,7 +97,7 @@ if __name__ == "__main__":
         optimizer_args= {'lr': 5e-5, 'betas': (0.9, 0.95), 'weight_decay': 0.001},
         lr_sched=torch.optim.lr_scheduler.CosineAnnealingLR,
         lr_sched_args= {'eta_min': 0},
-        noise_scheduler=LinearMaskScheduler(vocab_size),
+        noise_scheduler=LinearMaskScheduler(vocab_size, masking_ratio=0),
         validation_dataset=val_dataset,
         collate_fn=collate_fn(pad_id),
         parallel=PARALLEL,

@@ -326,7 +326,7 @@ class MaskedAutoEncoderForCaptioning(nn.Module):
     def forward(self, images, captions, pad_mask, image_positions):
         encoded_images = self.transformer(images)
         text_mask = pad_mask
-        causal_mask = torch.tril(torch.ones(text_mask.shape[1], text_mask.shape[1], device=captions.device), diagonal=0)
+        causal_mask = nn.Transformer.generate_square_subsequent_mask(captions.shape[-1], device=images.device)
         caption_embed = self.wte(captions)
         decoded_captions = self.decoder(tgt=caption_embed, memory=encoded_images, tgt_mask = causal_mask, tgt_key_padding_mask=text_mask, tgt_is_causal=True)
         captions = self.caption_head(decoded_captions)

@@ -61,12 +61,11 @@ if __name__ == "__main__":
                         tokenizer=BertTokenizerFast.from_pretrained('bert-base-uncased', cache_dir='cache/'),
                         ignore_cache=False,
                         train=True)
-    sub_dataset = Subset(dataset, range(100))
 
-    vocab_size = len(sub_dataset.dataset.tokenizer)
-    pad_id = sub_dataset.dataset.tokenizer.pad_token_id
+    vocab_size = len(dataset.tokenizer)
+    pad_id = dataset.tokenizer.pad_token_id
 
-    train_dataset, val_dataset = random_split(sub_dataset.dataset, [0.85, 0.15])
+    train_dataset, val_dataset = random_split(dataset, [0.85, 0.15])
 
     print("== Loading Model ==")
     config = MaskedAEConfig(vocab_size=vocab_size)

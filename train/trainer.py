@@ -31,6 +31,7 @@ class Trainer():
                  local_rank : int = None) -> None:
         
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        parallel = False if parallel == None else True
 
         # Model
         self.model = model
@@ -67,7 +68,8 @@ class Trainer():
         self.rank = rank
         self.local_rank = local_rank
         self.head = rank == 0 or self.parallel == False
-
+        
+        print("Init Logger")
         self.logger = TrainLogger("dl-train", "logs/") if self.head else None
 
         self.noise_scheduler = noise_scheduler
@@ -128,12 +130,13 @@ class Trainer():
             if self.local_rank == None:
                 raise ValueError("Rank must be defined for distributed training")
             self.model = self.model.to(self.local_rank)
-            self.model = DDP(self.model, device_ids=[self.local_rank])
+            self.model = DDP(self.model, device_ids=[self.local_rank], find_unused_parameters=True)
             map_location = {'cuda:%d' % 0: 'cuda:%d' % self.local_rank}
         # Single GPU training
         else:
             map_location = None
-
+        
+        print("Init Optimizer")
         # Create optimizer with params we just created
         optimizer : torch.optim.Optimizer = self.optimizer(self.model.parameters(), **self.optimizer_args)
 
@@ -146,16 +149,18 @@ class Trainer():
             lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=4 * len(train_dataloader), T_mult=2, last_epoch=self.epoch)
             lr_warmup = torch.optim.lr_scheduler.LinearLR(optimizer, 0.000001, 1, total_iters=40 * len(train_dataloader), last_epoch=self.epoch)
             main_scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, [lr_warmup, lr_scheduler], [40 * len(train_dataloader)], last_epoch=self.epoch)
-
+        
+        print("Load if needed")
         # Load Stuff
         if load_path != None:
             self.load_state_dict(self.model, optimizer, main_scheduler, scaler, load_path, map_location=map_location)
             if self.parallel:
                 dist.barrier()
-                
-        for param in self.model.transformer.parameters():
+        print("Freezing encoder") 
+        for param in self.model.module.transformer.parameters():
             param.requires_grad = False
 
+        print("Logging Logger", self.parallel)
         if self.head:
             self.logger.log("Starting training...")
 
@@ -172,6 +177,8 @@ class Trainer():
             epoch_caption_loss = torch.tensor([0], device=self.device, dtype=torch.float)
             epoch_image_loss.requires_grad = False
             epoch_caption_loss.requires_grad = False
+
+            print("Begin Epoch")
 
             for images, captions, lengths in train_dataloader:
 

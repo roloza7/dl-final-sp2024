@@ -9,7 +9,6 @@ from models.masked_autoencoder import MaskedAEConfig
 from noise.scheduler import LinearMaskScheduler
 import torch
 from torchvision import transforms
-
 def custom_collate_fn(batch):
     images = [item[0] for item in batch]
     labels = [item[1] for item in batch]
@@ -51,7 +50,7 @@ class ClassifierTrainer:
                     data = scheduler.batched_linear_mask(data)[0]
                     data, targets = data.to(self.device), targets.to(self.device)
                     self.optimizer.zero_grad()
-                    outputs = self.model(data, targets)
+                    outputs = self.model.forward(data) # Learnable captions
                     targets = torch.squeeze(targets)
                     loss = self.criterion(outputs, targets)
                     loss.backward()
@@ -66,8 +65,8 @@ class ClassifierTrainer:
                     pbar.update(1)
                     pbar.set_description(f'Loss: {total_loss / i}, Accuracy: {accuracy * 100:.2f}%')
                 self.validate()
-                torch.save(self.model.state_dict(), f'model_iter_{i}.pth')
-                torch.save(self.optimizer.state_dict(), f'optimizer_iter_{i}.pth')
+                torch.save(self.model.state_dict(), f'model_epoch_{epoch}.pth')
+                torch.save(self.optimizer.state_dict(), f'optimizer_epoch_{epoch}.pth')
 
 
     def validate(self):
@@ -81,7 +80,7 @@ class ClassifierTrainer:
             for data, targets in self.val_loader:
                 data = scheduler.batched_linear_mask(data)[0]
                 data, targets = data.to(self.device), targets.to(self.device)
-                outputs = self.model(data, targets)
+                outputs = self.model.forward(data)
 
                 # Calculate loss
                 targets = torch.squeeze(targets)
@@ -100,10 +99,9 @@ class ClassifierTrainer:
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    num_classes = 1000  # ImageNet classes
-    learning_rate = 1e-6
+    learning_rate = 1e-4
     batch_size = 32
-    num_epochs = 6
+    num_epochs = 25
     transform = transforms.Compose([
         transforms.Resize((224, 224)),  # Resize as per the autoencoder's expected input
         transforms.ToTensor(),
@@ -119,10 +117,12 @@ def main():
 
     # Initialize the model
     model = ImageNetClassifier(MaskedAEConfig(30522)).to(device)
+    model.load_state_dict(torch.load(r"C:\Users\zacha\Documents\GitHub\dl-final-sp2024\model_epoch_0.pth"))
 
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = Adam(model.parameters(), lr=learning_rate)
+    optimizer.load_state_dict(torch.load(r"C:\Users\zacha\Documents\GitHub\dl-final-sp2024\optimizer_epoch_0.pth"))
 
     # Initialize the Trainer
     trainer = ClassifierTrainer(model, train_loader, val_loader, criterion, optimizer, device)
